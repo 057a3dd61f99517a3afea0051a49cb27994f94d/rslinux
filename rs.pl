@@ -81,7 +81,10 @@ my %B = (
 		switch => [qw/--disable-gss --disable-nfsv4 --without-tcp-wrappers/],
 	},
 	emacs => {
-		#switch => [qw/--without-x --with-file-notification=inotify/],
+		switch => [qw/--without-x --with-file-notification=inotify/],
+	},
+	ffmpeg => {
+		switch => [qw/--enable-libfreetype --enable-libx264 --enable-gpl --enable-x11grab/]
 	},
 	qemu => {
 		switch => [qw|--extra-cflags=-I/include/ncursesw --cc=gcc --target-list=i386-softmmu,x86_64-softmmu,arm-linux-user --audio-drv-list=alsa|],
@@ -156,6 +159,9 @@ my %B = (
 	},
 	wireshark => {
 		switch => [qw/--with-gtk2 --enable-setuid-install/]
+	},
+	x264 => {
+		switch => [qw/--enable-static --enable-shared/]
 	}
     );
 =c
@@ -279,8 +285,56 @@ sub walk {
 	}
 	return $ans;
 }
+# difference of entry.
+sub de {
+	my ($f, $p, $q) = @_;
+	my $d = 0;
+	for (qw/mode uid gid mt hl/) {
+		my ($a, $b) = ($p->{$_} // "", $q->{$_} // "");
+		if ($a ne $b) {
+			$d++;
+			if ($_ eq "mode") {
+				$_ = sprintf "%.7o", $_ for ($a, $b);
+			} elsif ($_ eq "mt") {
+				$_ = localtime($_) for ($a, $b);
+			}
+			print $f, " $_ differs, previous: $a, now: $b.\n";
+		}
+	}
+	$d;
+}
+sub check {
+	my ($p, $h, $d) = @_;
+	$d = "" unless $d;
+	my $ans = {};
+	for (sort keys %$h) {
+		my $r = $d . $_;
+		my $f = $p->{root} . $r;
+		my $e = {};
+		(my $i, @{$e}{qw/mode uid gid mt/}) = (lstat($f))[1, 2, 4, 5, 9];
+		if ($i) {
+			if ($p->{ih}{$i})	{ $e->{hl} = $e->{c} = $p->{ih}{$i} }
+			else			{ $p->{ih}{$i} = $r }
+			if (-d _ and ref $h->{$_}{c} eq "HASH") {
+				$e->{c} = check($p, $h->{$_}{c}, $d . $_ . "/");
+				$ans->{$_} = $e if %{$e->{c}}
+			} else {
+				if (de($f, $h->{$_}, $e)) {
+					$e->{ow} = 1;
+					my $t = $filetype{$e->{mode} & 0170000};
+					$e->{c} = readlink $f if $t eq "symbolic link";
+					$ans->{$_} = $e;
+				}
+			}
+		} else {
+			$ans->{$_} = $h->{$_};
+		}
+	}
+	$ans;
+}
 sub diff {
 	my ($p, $q, $d) = @_;
+	$d = "" unless $d;
 	my $ans = {};
 	for (keys %$q) {
 		my $f = $d . $_;
@@ -295,16 +349,7 @@ sub diff {
 					$ans->{$_} = {%{$q->{$_}}}, $ans->{$_}{c} = $t;
 				}
 			} else {
-				for my $k (qw/mode uid gid mt hl/) {
-					my ($a, $b) = ($p->{$_}{$k} // "", $q->{$_}{$k} // "");
-					if ($a ne $b) {
-						$ow = 1;
-						if ($k eq "mode") {
-							$_ = sprintf "%.7o", $_ for ($a, $b);
-						}
-						print $f, " $k differs, previous: $a, now: $b.\n";
-					}
-				}
+				$ow = de($f, $p->{$_}, $q->{$_});
 			}
 		} else {
 			$ne = 1;
@@ -477,16 +522,46 @@ sub rs_pson_normalize {
 	}
 }
 
+my %S;
+while (@ARGV) {
+	my $s = shift @ARGV;
+	if ($s eq "-") {
+		last;
+	} elsif ($s =~ /^-(.*)/) {
+		$s = $1;
+		my $p = shift @ARGV;
+		if ($p =~ /^-/)	{
+			unshift @ARGV, $p;
+			$S{$s} = 1;
+		} else {
+			$S{$s} = $p
+		}
+	} else {
+		unshift @ARGV, $s;
+		last
+	}
+}
 my $op = shift @ARGV;
 if ($op =~ /compile/) {
-	# the source tarball.
+	# the source tarball or a directory.
 	my $f = shift @ARGV;
-	$f =~ m|([^/]*)-| or die "source tarball filename unrecognized.";
 	# package name.
-	my $pn = $1;
+	my $pn = $S{package};
+	unless ($pn) {
+		$f =~ m|([^/]*)-| or die "source tarball filename unrecognized.";
+		$pn = $1;
+	}
+	die "no package name." unless $pn;
 	# the directory we want to enter after extracting the tarball.
-	(c::xsh(1, qw/tar -xvf/, $f))[0] =~ m|([^/\n]*)| or die "tarball structure unable to handle.";
-	my $d = $1;
+	my $d;
+	if (-d $f) {
+		$d = $f;
+	} else {
+		(c::xsh(1, qw/tar -xvf/, $f))[0] =~ m|([^/\n]*)| or die "tarball structure unable to handle.";
+		$d = $1;
+	}
+	# previous working directory.
+	my $pwd = readlink "/proc/self/cwd" or die "readlink: $!.";
 	chdir $d or die "chdir $d: $!";
 	unless ($B{$pn}{noc}) {
 		c::xsh(0, qw/autoreconf -iv/) or die "autoreconf failed." unless -x "configure";
@@ -505,12 +580,13 @@ if ($op =~ /compile/) {
 		}
 		c::xsh(0, "./configure", @{$B{$pn}{switch}}, $prefix, qw/r:2>1 | less -KR/) or die "configure failed.";
 	}
-	c::xsh(0, qw/bash -c/, $B{$pn}{postc}) if $B{$pn}{postc};
+	c::xsh(0, qw/bash -c/, $B{$pn}{postc}) or die "post configure failed." if $B{$pn}{postc};
 	c::xsh(0, "make", @{$B{$pn}{mkparam}}) or die "make failed." unless $B{$pn}{nomk};
 	c::xsh(0, qw/rd make install/, @{$B{$pn}{miparam}}) or die "make install failed.";
-	c::xsh(0, qw/rd bash -c/, $B{$pn}{postmi}) if $B{$pn}{postmi};
-	chdir ".." and c::xsh(0, qw/rm -rf/, $d) or die "cannot remove source code directory.";
-} elsif ($op =~ /^(display|\+ow|delete|add|remove|patch)$/) {
+	c::xsh(0, qw/rd bash -c/, $B{$pn}{postmi}) or die "post make install failed." if $B{$pn}{postmi};
+	chdir $pwd or die "chdir to previous working directory $pwd failed: $!.";
+	c::xsh(0, qw/echo rm -rf/, $d) or die "cannot remove source code directory." unless -d $f;
+} elsif ($op =~ /^(display|\+ow|delete|add|remove|patch|check)$/) {
 	my $f = shift @ARGV;
 	cxs::mmap($f, my $b);
 	my $h = (pson_parse({strref => \$b, flag => 1}, 0))[0];
@@ -585,8 +661,16 @@ if ($op =~ /compile/) {
 		# remove or patch now.
 		my $root = shift @ARGV;
 		die "root directory not specified." unless $root;
-		if ($op eq "remove")	{ remove($h, $root) }
-		else {
+		if ($op eq "remove") {
+			remove($h, $root)
+		} elsif ($op eq "check") {
+			my $d = check({root => $root, ih => {}}, $h);
+			if (%$d) {
+				display($d, $root)
+			} else {
+				print "\e[32mperfect\e[m.\n"
+			}
+		} else {
 			my $g = {};
 			for (@ARGV) {
 				my @d = split m|/|;
@@ -675,4 +759,4 @@ if ($op =~ /compile/) {
 		}
 	}
 }
-print rf("/proc/self/status");
+print rf("/proc/self/status") if $S{verbose};
