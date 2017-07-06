@@ -20,7 +20,7 @@
 
 =cut
 use strict;
-use c;
+use c 'constant';
 use feature qw/say state/;
 our @A = qw/c cxs/;
 
@@ -429,11 +429,12 @@ sub main {
 			pipe my $r, my $w or die $!;
 			my $pid = xsh({asynchronous => 1}, qw/less -R/, {to => *STDIN,
 									 from => $r,
-									 mode => "<"});
+									 mode => '<'});
+			close $r;
 			_json_unparse({readable => 1,
 				       sink => $w}, {v => tag({oid => $oid,
 							       sink => $w}, {db => $db,
-									     d => ""}),
+									     d => ''}),
 						     d => 0});
 			close $w;
 			# we must wait here or we will lose control-terminal.
