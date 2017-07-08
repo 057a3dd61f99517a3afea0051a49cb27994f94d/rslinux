@@ -22,7 +22,6 @@
 # dedicated to Robert Schumann.
 use strict;
 use c;
-use cxs;
 
 my %filetype = (
 	0140000 => "socket",
@@ -67,11 +66,12 @@ my %B = (
 	"alsa-utils" => {
 		switch => [qw/--disable-xmlto/],
 	},
+	# https://www.freedesktop.org/wiki/Software/Glamor/
 	mesa => {
-		switch => [qw/--with-dri-drivers=i965 --with-gallium-drivers=/],
+		switch => [qw/--with-egl-platforms=x11,drm --with-dri-drivers=i965 --with-gallium-drivers= --enable-gbm --enable-glx-tls/],
 	},
 	"xorg-server" => {
-		switch => [qw|--with-fontrootdir=/share/fonts/X11|],
+		switch => [qw|--with-fontrootdir=/share/fonts/X11 --enable-glamor|],
 		postmi => 'chmod u+s /bin/Xorg',
 	},
 	libtirpc => {
@@ -154,22 +154,51 @@ my %B = (
 		mkparam => [qw|generic_gcc -f unix/Makefile|],
 		miparam => [qw|prefix=/ install -f unix/Makefile|]
 	},
-	icecat => {
+	firefox => {
 		switch => [qw/--disable-dbus --disable-pulseaudio --disable-gstreamer --disable-necko-wifi/]
 	},
 	wireshark => {
-		switch => [qw/--with-gtk2 --enable-setuid-install/]
+		switch => [qw/--with-qt --with-gtk2 --enable-setuid-install/]
 	},
 	x264 => {
 		switch => [qw/--enable-static --enable-shared/]
+	},
+	cdrtools => {
+		noc => 1,
+		mkparam => ["CCOM=gcc"],
+		miparam => ["INS_BASE=/"]
+	},
+	gnutls => {
+		switch => [qw/--with-included-libtasn1 --without-p11-kit/]
+	},
+	wxWidgets => {
+		switch => [qw/--enable-compat28/]
+	},
+	cryptopp => {
+		noc => 1,
+		miparam => ["PREFIX=/"]
+	},
+	amule => {
+		switch => [qw/--enable-amule-daemon --enable-amulecmd --enable-webserver --enable-amule-gui --disable-debug --enable-optimize --enable-alc --enable-alcc --enable-geoip/]
+	},
+	gnuplot => {
+		switch => [qw/--enable-qt/]
+	},
+	mupdf => {
+		noc => 1,
+		mkparam => ["CC=gcc"],
+		miparam => ["prefix=/"]
+	},
+	"proxychains-ng" => {
+		mkparam => ["CC=gcc"]
+	},
+	"mutt" => {
+		switch => ["--with-mailpath=/tmp"]
 	}
     );
 =c
 qt5:
-	./configure -prefix / -archdatadir /share/qt -datadir /share/qt -examplesdir /share/qt/examples -hostdatadir /share/qt -opensource -nomake tests -qt-xcb -no-dbus
-qt4:
-	./configure -prefix / -docdir /share/qt4/doc -plugindir /share/qt4/plugins -importdir /share/qt4/imports -datadir /share/qt4 -translationdir /share/qt4/translations -examplesdir /share/qt4/examples -demosdir /share/qt4/demos -opensource -nomake tests
-	tests is still installed under /, mannually move is required.
+	./configure -prefix / -opensource -nomake tests -qt-xcb -no-dbus
 =cut
 
 sub pson_unparse {
@@ -201,12 +230,12 @@ sub pson_unparse_w {
 		my $p = $$a;
 		if ($p->{type} eq "substr") {
 			syswrite $fh, "S" . pack("L", $p->{length});
-			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "cxs::write";
+			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "write";
 		} elsif ($p->{type} eq "mmap") {
-			if (cxs::mmap($p->{f}, my $b)) {
+			if (mmap($p->{f}, my $b)) {
 				syswrite $fh, "S" . pack("L", length($b));
 				syswrite $fh, $b;
-				cxs::munmap($b, length($b));
+				munmap($b, length($b));
 			} else {
 				syswrite $fh, "S" . pack("L", 0);
 			}
@@ -215,12 +244,10 @@ sub pson_unparse_w {
 		syswrite $fh, "S" . pack("L", length($a)) . $a;
 	}
 }
-=c
 sub pson_parse_wrap {
 	my $a = shift;
-	return (pson_parse(\$a, 0))[0];
+	return (pson_parse({strref => \$a}, 0))[0];
 }
-=cut
 sub pson_parse {
 	my ($p, $i) = @_;
 	my ($a, $f) = @{$p}{qw/strref flag/};
@@ -367,9 +394,9 @@ sub diff {
 					if (unlink $f)	{ print "successed.\n" }
 					else		{ print "failed.\n" }
 				} else {
-					if (c::xsh(1, "file", $f) =~ /(executable|shared object).*not stripped/) {
+					if (xsh(1, "file", $f) =~ /(executable|shared object).*not stripped/) {
 						print "trying to strip $f...";
-						c::xsh(0, "strip", $f);
+						xsh(0, "strip", $f);
 						unless ($?) {
 							print "successed.\n";
 							set($f, @{$q->{$_}}{qw/mode uid gid mt/});
@@ -400,22 +427,30 @@ sub diff {
 	return $ans;
 }
 sub remove {
-	my ($h, $d) = @_;
+	my ($h, $j, $d) = @_;
 	for (keys %$h) {
 		my $f = $d . $_;
 		my $t = $filetype{$h->{$_}{mode} & 0170000};
 		print "$f\n" unless $t;
-		if ($t eq "directory")	{ remove($h->{$_}{c}, $f . "/") }
-		elsif ($h->{$_}{ow})	{ print "\e[36m", "ignored overwritten file $f.\n", "\e[m" }
-		else			{ unlink $f or print "unable to unlink $f.\n" }
+		if ($t eq "directory") {
+			remove($h->{$_}{c}, $j->{$_}{c}, $f . "/");
+			delete $j->{$_} unless %{$j->{$_}{c}};
+		} elsif ($h->{$_}{ow}) {
+			print "\e[36m", "ignored overwritten file $f.\n", "\e[m";
+		} else {
+			if (unlink $f)	{ delete $j->{$_} }
+			else		{ print "unable to unlink $f: $!.\n" }
+		}
 	}
-	if (rmdir $d)	{ print "successfully rmdir $d.\n" }
-	else		{ print "unable to rmdir $d.\n" }
+	unless (%$j) {
+		if (rmdir $d)	{ print "successfully rmdir $d.\n" }
+		else		{ print "unable to rmdir $d.\n" }
+	}
 }
 sub set {
 	my ($f, $mode, $uid, $gid, $mt) = @_;
 	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
-	chown $uid, $gid, $f and chmod $mode & 07777, $f and cxs::utimensat($f, $mt) or die "$f: $!";
+	chown $uid, $gid, $f and chmod $mode & 07777, $f and utimensat($f, $mt) or die "$f: $!";
 }
 sub rf {
 	my $f = shift;
@@ -429,7 +464,7 @@ sub wf {
 	if ($c) {
 		if (ref $c eq "REF") {
 			my $p = $$c;
-			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "cxs::write";
+			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "write";
 		} else {
 			print $fh $c;
 		}
@@ -439,35 +474,40 @@ sub wf {
 	}
 }
 sub patch {
-	my ($root, $h, $d) = @_;
+	my ($root, $h, $j, $d) = @_;
 	$d = "" unless $d;
 	for (sort keys %$h) {
 		my ($r, $f) = ($d . $_, $root . $d . $_);
 		my $t = $filetype{$h->{$_}{mode} & 0170000};
 		if ($t eq "directory") {
+			my $ne = 0;
 			unless (-d $f) {
+				$ne = 1;
 				mkdir $f or die "mkdir $f: $!";
-				patch($root, $h->{$_}{c}, $r . "/");
-				set($f, @{$h->{$_}}{qw/mode uid gid mt/});
-			} else {
-				patch($root, $h->{$_}{c}, $r . "/");
+				$j->{$_} = {%{$h->{$_}}}, $j->{$_}{c} = {};
 			}
+			patch($root, $h->{$_}{c}, $j->{$_}{c}, $r . "/");
+			set($f, @{$h->{$_}}{qw/mode uid gid mt/}) if $ne;
 		} elsif ($h->{$_}{ow}) {
 			print "\e[36m", "ignored overwritten file $f.\n", "\e[m";
-		} elsif ($t eq "regular file") {
-			if ($h->{$_}{hl}) {
-				my $g = $root . $h->{$_}{hl};
-				link $g, $f or die "unable to hard link $f to $g: $!";
-			} else {
-				wf($f, $h->{$_}{c});
-				set($f, @{$h->{$_}}{qw/mode uid gid mt/});
+		} else {
+			# meta-data only.
+			$j->{$_} = {%{$h->{$_}}}, delete $j->{$_}{c};
+			if ($t eq "regular file") {
+				if ($h->{$_}{hl}) {
+					my $g = $root . $h->{$_}{hl};
+					link $g, $f or die "unable to hard link $f to $g: $!";
+				} else {
+					wf($f, $h->{$_}{c});
+					set($f, @{$h->{$_}}{qw/mode uid gid mt/});
+				}
+			} elsif ($t eq "symbolic link") {
+				unlink $f or die "unable to remove $f for symbolic linking.\n" if -e $f;
+				symlink $h->{$_}{c}, $f or die "unable to symlink $f to $h->{$_}{c}.";
+				my ($uid, $gid, $mt) = @{$h->{$_}}{qw/uid gid mt/};
+				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
+				lchown($f, $uid, $gid) and utimensat($f, $mt) or die "$f: $!";
 			}
-		} elsif ($t eq "symbolic link") {
-			unlink $f or die "unable to remove $f for symbolic linking.\n" if -e $f;
-			symlink $h->{$_}{c}, $f or die "unable to symlink $f to $h->{$_}{c}.";
-			my ($uid, $gid, $mt) = @{$h->{$_}}{qw/uid gid mt/};
-			# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
-			cxs::lchown($f, $uid, $gid) and cxs::utimensat($f, $mt) or die "$f: $!";
 		}
 	}
 }
@@ -541,6 +581,7 @@ while (@ARGV) {
 		last
 	}
 }
+my $tree = $S{tree} // "$ENV{HOME}/.tree";
 my $op = shift @ARGV;
 if ($op =~ /compile/) {
 	# the source tarball or a directory.
@@ -557,14 +598,14 @@ if ($op =~ /compile/) {
 	if (-d $f) {
 		$d = $f;
 	} else {
-		(c::xsh(1, qw/tar -xvf/, $f))[0] =~ m|([^/\n]*)| or die "tarball structure unable to handle.";
+		(xsh(1, qw/tar -xvf/, $f))[0] =~ m|([^/\n]*)| or die "tarball structure unable to handle.";
 		$d = $1;
 	}
 	# previous working directory.
 	my $pwd = readlink "/proc/self/cwd" or die "readlink: $!.";
 	chdir $d or die "chdir $d: $!";
 	unless ($B{$pn}{noc}) {
-		c::xsh(0, qw/autoreconf -iv/) or die "autoreconf failed." unless -x "configure";
+		xsh(0, qw/autoreconf -iv/) or die "autoreconf failed." unless -x "configure";
 		my $prefix;
 		if ($op =~ /^pcompile/) {
 			$ENV{CFLAGS} = $ENV{CXXFLAGS} = $ENV{CPPFLAGS} = "-I/p/include";
@@ -578,17 +619,20 @@ if ($op =~ /compile/) {
 		if ($e) {
 			$ENV{$_} = $e->{$_} for (keys %$e);
 		}
-		c::xsh(0, "./configure", @{$B{$pn}{switch}}, $prefix, qw/r:2>1 | less -KR/) or die "configure failed.";
+		xsh(0, "./configure", @{$B{$pn}{switch}}, $prefix,
+		    {to => *STDERR,
+		     from => *STDOUT,
+		     mode => ">"}, qw/| less -KR/) or die "configure failed.";
 	}
-	c::xsh(0, qw/bash -c/, $B{$pn}{postc}) or die "post configure failed." if $B{$pn}{postc};
-	c::xsh(0, "make", @{$B{$pn}{mkparam}}) or die "make failed." unless $B{$pn}{nomk};
-	c::xsh(0, qw/rd make install/, @{$B{$pn}{miparam}}) or die "make install failed.";
-	c::xsh(0, qw/rd bash -c/, $B{$pn}{postmi}) or die "post make install failed." if $B{$pn}{postmi};
+	xsh(0, qw/bash -c/, $B{$pn}{postc}) or die "post configure failed." if $B{$pn}{postc};
+	xsh(0, "make", @{$B{$pn}{mkparam}}) or die "make failed." unless $B{$pn}{nomk};
+	xsh(0, qw/rd make install/, @{$B{$pn}{miparam}}) or die "make install failed.";
+	xsh(0, qw/rd bash -c/, $B{$pn}{postmi}) or die "post make install failed." if $B{$pn}{postmi};
 	chdir $pwd or die "chdir to previous working directory $pwd failed: $!.";
-	c::xsh(0, qw/echo rm -rf/, $d) or die "cannot remove source code directory." unless -d $f;
+	xsh(0, qw/rm -rf/, $d) or die "cannot remove source code directory." unless -d $f;
 } elsif ($op =~ /^(display|\+ow|delete|add|remove|patch|check)$/) {
 	my $f = shift @ARGV;
-	cxs::mmap($f, my $b);
+	mmap($f, my $b);
 	my $h = (pson_parse({strref => \$b, flag => 1}, 0))[0];
 	rs_pson_normalize($h);
 	if ($op eq "display") {
@@ -662,7 +706,9 @@ if ($op =~ /compile/) {
 		my $root = shift @ARGV;
 		die "root directory not specified." unless $root;
 		if ($op eq "remove") {
-			remove($h, $root)
+			my $j = pson_parse_wrap(rf($tree));
+			remove($h, $j, $root);
+			pson_unparse_w($j, wf($tree . "-candidate"));
 		} elsif ($op eq "check") {
 			my $d = check({root => $root, ih => {}}, $h);
 			if (%$d) {
@@ -691,9 +737,15 @@ if ($op =~ /compile/) {
 				}
 				$q->{$d[$i]} = $p->{$d[$i]} or die "$_ doesn't exist in $f.";
 			}
-			patch($root, %$g ? $g : $h);
+			my $j;
+			if ($S{"no-tree"})	{ $j = {} }
+			else			{ $j = pson_parse_wrap(rf($tree)) }
+			patch($root, %$g ? $g : $h, $j);
+			pson_unparse_w($j, wf($tree . "-candidate")) unless $S{"no-tree"};
 		}
 	}
+} elsif ($op eq "p2j") {
+	print json_unparse_readable(pson_parse_wrap(rf(shift)));
 } else {
 	my ($root, $df) = @ARGV;
 	die "root directory not specified." unless $root;
@@ -701,7 +753,7 @@ if ($op =~ /compile/) {
 		root => $root,
 		ih => {},
 		exclude => [
-			qw/lost+found home var root boot proc sys run dev tmp p usr private/,
+			qw/lost+found home var root boot proc sys run dev tmp p usr private texlive/,
 			#   these two info directory files are updated when installing info files, they don't
 			# really belong to any particular package.
 			"info/dir", "share/info/dir",
@@ -714,7 +766,7 @@ if ($op =~ /compile/) {
 				lynx.lss mtab nsswitch.conf protocols resolv.conf udev/rules.d
 				X11/xorg.conf wgetrc login.defs fstab ld.so.cache sshd.pid ld.so.conf
 				services smb.conf sshd_config hosts.allow hosts.deny exports adjtime
-				modprobe.d
+				modprobe.d xml netns
 
 				passwd- group- shadow-
 			    |,
@@ -736,7 +788,7 @@ if ($op =~ /compile/) {
 			# additional flags to quite a few packages after.
 			map("lib/pkgconfig/" . $_, qw/ncurses.pc ncursesw.pc/),
 			# ssl related.
-			map("ssl/" . $_, qw/openssl.cnf certs cert.pem/),
+			map("ssl/" . $_, qw/certs cert.pem/),
 			# kernel modules.
 			"lib/modules",
 			# windows fonts.
@@ -749,12 +801,13 @@ if ($op =~ /compile/) {
 	};
 	if ($op eq "create") {
 		my $h = walk($p);
-		wf(".rs", c::json_unparse($h));
+		pson_unparse_w($h, wf($tree));
 	} else {
 		die "diff file not specified." unless $df;
 		if ($op eq "diff") {
 			my $q = walk($p);
-			my $p = c::json_parse_wrap(rf(".rs"));
+			pson_unparse_w($q, wf($tree . "-candidate"));
+			my $p = pson_parse_wrap(rf($tree));
 			pson_unparse_w(diff($p, $q, $root), wf($df));
 		}
 	}
