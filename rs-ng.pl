@@ -62,22 +62,22 @@ sub rs_unparse {
 	my ($v, $k) = ($vp->{v}, $vp->{k} // "");
 	if ($k eq "c" and (not ref $v or ref $v->{s} eq "SCALAR")) {
 		if (ref $v) {
-			syswrite $cp->{sink}, "S" . pack "L", $v->{l};
-			syswrite $cp->{sink}, ${$v->{s}}, $v->{l}, $v->{o};
+			print {$cp->{sink}} "S" . pack "L", $v->{l};
+			print {$cp->{sink}} substr ${$v->{s}}, $v->{l}, $v->{o};
 		} else {
 			if (mmap($v, my $b)) {
-				syswrite $cp->{sink}, "S" . pack "L", length $b;
-				syswrite $cp->{sink}, $b;
+				print {$cp->{sink}} "S" . pack "L", length $b;
+				print {$cp->{sink}} $b;
 				munmap($b, length $b);
 			} else {
-				syswrite $cp->{sink}, "S" . pack "L", 0;
+				print {$cp->{sink}} "S" . pack "L", 0;
 			}
 		}
 	} else {
 		if (not ref $vp->{v}) {
-			syswrite $cp->{sink}, "S" . pack("L", length $v) . $v;
+			print {$cp->{sink}} "S" . pack("L", length $v) . $v;
 		} else {
-			syswrite $cp->{sink}, "H" . pack "L", ~~keys %$v;
+			print {$cp->{sink}} "H" . pack "L", ~~keys %$v;
 			for (keys %$v) {
 				rs_unparse($cp, {v => $_});
 				rs_unparse($cp, {v => $v->{$_},
