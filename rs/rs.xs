@@ -28,23 +28,62 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <string.h>
 #include "c.h"
 
 #define CALL	s[sp].st = NEW, sp += 1
 #define RET(a)	v = a, sp -= 1
+
+#define BLKSZ	4096
+#define FLUSH	errn1(write(fd, ou, ol)); ol = 0
+
+#define LLAC(a)		s[sp].st = NEW, sp += 1, v = a
+#define TER		sp -= 1
+#define HPACK(t, l)	*p = t, *(uint32_t*)(p + 1) = (uint32_t)l, cwrite(fd, p, 5)
+
+void *mmapr(const char *f, off_t *l)
+{
+	int	fd;
+	errn1(fd = open(f, O_RDONLY));
+	struct stat	b;
+	errn1(fstat(fd, &b));
+	if (l)	*l = b.st_size;
+	void	*p = NULL;
+	if (b.st_size)
+		errn1((long int)(p = mmap(0, b.st_size, PROT_READ, MAP_PRIVATE, fd, 0)));
+	errn1(close(fd));
+	return p;
+}
+void cwrite(int fd, const char *in, size_t il)
+{
+	static char	ou[BLKSZ];
+	static size_t	ol;
+	unless (in) {
+		FLUSH;
+		return;
+	}
+	while (il) {
+		if (ol + il >= BLKSZ) {
+			if (ol == 0) {
+				errn1(write(fd, in, il));
+				il = 0;
+			} else {
+				size_t	l = BLKSZ - ol;
+				memcpy(ou + ol, in, l); ol += l, in += l, il -= l;
+				FLUSH;
+			}
+		} else {
+			memcpy(ou + ol, in, il); ol += il, il = 0;
+		}
+	}
+}
 
 MODULE = rs		PACKAGE = rs
 
 SV*
 rs_parse(char *f)
 	CODE:
-		int	fd;
-		errn1(fd = open(f, O_RDONLY));
-		struct stat	b;
-		errn1(fstat(fd, &b));
-		char	*p;
-		errn1((long int)(p = (char*)mmap(0, b.st_size, PROT_READ, MAP_PRIVATE, fd, 0)));
-		errn1(close(fd));
+		char	*p = (char*)mmapr(f, NULL);
 		struct {
 			enum {
 				NEW, RK, RV
@@ -54,7 +93,8 @@ rs_parse(char *f)
 			HV		*v;
 		}s[256], *q;
 		SV	*v;
-		uc	sp = 1;
+		uc	sp = 0;
+		CALL;
 		while (sp) {
 			q = s + sp - 1;
 			if (q->st == NEW) {
@@ -93,3 +133,60 @@ rs_parse(char *f)
 		RETVAL = v;
 	OUTPUT:
 		RETVAL
+
+void
+rs_unparse(SV *v, int fd)
+	CODE:
+		char	p[5];
+		struct {
+			enum {
+				NEW, OLD
+			}st;
+			HV	*v;
+		}s[256], *q;
+		uc	sp = 0;
+		LLAC(v);
+		while (sp) {
+			q = s + sp - 1;
+			if (q->st == NEW) {
+				unless (SvROK(v)) {
+					char	*in;
+					STRLEN	il;
+					in = SvPV(v, il);
+					HPACK('S', il);
+					cwrite(fd, in, il);
+					TER;
+				} else {
+					v = SvRV(v);
+					if (SvTYPE(v) < SVt_PVAV) {
+						off_t	il;
+						char	*in = (char*)mmapr(SvPV_nolen(v), &il);
+						HPACK('S', il);
+						if (il) {
+							cwrite(fd, in, il);
+							errn1(munmap(in, il));
+						}
+						TER;
+					} else {
+						q->v = (HV*)v, q->st = OLD;
+						uint32_t	l = 0;
+						hv_iterinit(q->v);
+						while (hv_iternext(q->v))	l += 1;
+						HPACK('H', l);
+						hv_iterinit(q->v);
+					}
+				}
+			} else {
+				char	*key;
+				I32	retlen;
+				v = hv_iternextsv(q->v, &key, &retlen);
+				if (v) {
+					HPACK('S', retlen);
+					cwrite(fd, key, retlen);
+					LLAC(v);
+				} else {
+					TER;
+				}
+			}
+		}
+		cwrite(fd, NULL, 0);
