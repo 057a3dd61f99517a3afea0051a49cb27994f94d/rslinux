@@ -22,10 +22,45 @@
 use strict;
 use c 'constant';
 use feature qw/say state/;
-our @A = qw/c cxs/;
+our @A = qw/c cxs rs/;
 
 main();
 
+=c
+sub rs_parse2 {
+	mmap(shift, my $b);
+	my ($i, @s, $v) = (0, {});
+	my $max = 0;
+	while (@s) {
+		$max = @s if @s > $max;
+		my $s = $s[-1];
+		if (not $s->{v}) {
+			my ($t, $l) = unpack 'aL', substr $b, $i, 5;
+			$i += 5;
+			if ($t eq 'S') {
+				# regular file content.
+				if ($s->{c})	{ $v = [\$b, $l, $i] }
+				else		{ $v = substr $b, $i, $l }
+				$i += $l;
+				pop @s;
+			} else {
+				if ($l)	{ @$s{qw/v l st/} = ({}, $l, 'rk'); push @s, {} }
+				else	{ $v = {}; pop @s }
+			}
+		} else {
+			if ($s->{st} eq 'rk') {
+				@$s{qw/k st/} = ($v, 'rv');
+				push @s, {c => $v eq 'c'};
+			} else {
+				$s->{v}{$s->{k}} = $v;
+				if ($s->{l} -= 1)	{ $s->{st} = 'rk'; push @s, {} }
+				else			{ $v = $s->{v}; pop @s }
+			}
+		}
+	}
+	say "max depth: $max.";
+	$v;
+}
 sub rs_parse_wrap {
 	my $f = shift;
 	my $cp = {b => undef,
@@ -57,6 +92,7 @@ sub rs_parse {
 	}
 	$v;
 }
+=cut
 sub rs_unparse {
 	my ($cp, $vp) = @_;
 	my ($v, $k) = ($vp->{v}, $vp->{k} // "");
@@ -328,7 +364,7 @@ sub main {
 		$s = {%$p,
 		      %$s};
 		my $op = shift @ARGV;
-		my $db = rs_parse_wrap($s->{db}) if $op =~ /^(diff|patch|rm|tag)$/;
+		my $db = rs_parse($s->{db}) if $op =~ /^(diff|patch|rm|tag)$/;
 		if ($op eq "diff") {
 			my ($oid, $root) = splice @ARGV, 0, 2;
 			my ($p, $_v) = $s->{pool} . $oid . ".rs";
