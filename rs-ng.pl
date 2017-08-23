@@ -92,7 +92,6 @@ sub rs_parse {
 	}
 	$v;
 }
-=cut
 sub rs_unparse {
 	my ($cp, $vp) = @_;
 	my ($v, $k) = ($vp->{v}, $vp->{k} // "");
@@ -122,6 +121,7 @@ sub rs_unparse {
 		}
 	}
 }
+=cut
 sub set {
 	my ($f, $mode, $uid, $gid, $mtime) = @_;
 	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
@@ -202,7 +202,7 @@ sub diff {
 						     owner => $db->{$_}{owner}};
 				$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 				$v->{$_} = {%$m};
-				$v->{$_}{c} = $f if $n;
+				$v->{$_}{c} = \$f if $n;
 			}
 		}
 	}
@@ -301,7 +301,7 @@ sub rm {
 						}
 						my $p = $cp->{patch};
 						if (not $p->{$oid}) {
-							my $v = rs_parse_wrap($cp->{pool} . $oid . ".rs");
+							my $v = rs_parse($cp->{pool} . $oid . '.rs');
 							$p->{$oid} = {v => $v,
 								      p => {}};
 						}
@@ -315,19 +315,11 @@ sub rm {
 	}
 }
 sub wf {
-	my ($f, $c) = @_;
+	my $f = shift;
 	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
-	open my $fh, ">", $f or die "open $f for writing: $!";
-	if ($c) {
-		if (ref $c eq "HASH") {
-			syswrite $fh, ${$c->{s}}, $c->{l}, $c->{o};
-		} else {
-			print $fh $c;
-		}
-		close $fh or die "close $f: $!";
-	} else {
-		return $fh;
-	}
+	open my $fh, '>', $f or die "open $f for writing: $!";
+	if (@_)	{ syswrite $fh, shift }
+	else	{ $fh }
 }
 sub priv {
 	my $f = shift;
@@ -370,7 +362,7 @@ sub main {
 			my ($p, $_v) = $s->{pool} . $oid . ".rs";
 			if (-e $p) {
 				say "$p exists, will merge with new generated patch tree.";
-				$_v = rs_parse_wrap($p);
+				$_v = rs_parse($p);
 			}
 			my $v = diff({ih => {},
 				      root => $root,
@@ -379,12 +371,12 @@ sub main {
 						    ign => $s->{ign} ? do $s->{ign} : undef,
 						    d => ""});
 			merge($v, $_v) if $_v;
-			rs_unparse({sink => wf($p)}, {v => $v});
+			rs_unparse($v, fileno wf($p));
 		} elsif ($op eq 'patch') {
 			my ($f, $root) = splice @ARGV, 0, 2;
 			#   v is the parsed value of the patch, and can be cut using subtree switch,
 			# the final patch to apply is stored in p.
-			my $v = my $p = rs_parse_wrap($f);
+			my $v = my $p = rs_parse($f);
 			if (exists $s->{subtree}) {
 				$p = {};
 				grow($p, $v, $_) for flatten($s->{subtree});
@@ -476,6 +468,6 @@ sub main {
 			# we must wait here or we will lose control-terminal.
 			waitpid $pid, 0;
 		}
-		rs_unparse({sink => wf($s->{db})}, {v => $db}) if $op =~ /^(diff|patch|rm)$/;
+		rs_unparse($db, fileno wf($s->{db})) if $op =~ /^(diff|patch|rm)$/;
 	}
 }
