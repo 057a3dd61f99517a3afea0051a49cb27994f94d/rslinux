@@ -1,0 +1,111 @@
+=license
+
+	Copyright © 2018 Yang Bo
+
+	This file is part of RSLinux.
+
+	RSLinux is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	RSLinux is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+{glibc => {switch => ['--enable-obsolete-rpc'],
+	   'separate-build' => 1},
+ gmp => {'post-make' => 'make check'},
+ mpfr => {'post-make' => 'make check'},
+ mpc => {'post-make' => 'make check'},
+ gcc => {switch => [qw/--enable-languages=c,c++ --disable-multilib/],
+	 'separate-build' => 1},
+ ncurses => {switch => [qw/--with-shared/]},
+ ncursesw => {switch => [qw|--includedir=/usr/include/ncursesw --with-shared --enable-widec --disable-db-install --without-manpages --without-progs|]},
+ bash => {switch => [qw/--with-curses/]},
+ perl => {'no-configure' => 1,
+	  'post-configure' => './Configure -de -Dprefix=/usr',
+	  'post-make' => 'make test'},
+ bzip2 => {'no-configure' => 1,
+	   'make-install-parameter' => [qw|PREFIX=/usr|]},
+ 'man-db' => {switch => [qw/--disable-setuid/]},
+ openssl => {'no-configure' => 1,
+	     'post-configure' => './config --prefix=/usr --openssldir=/share/openssl shared',
+	     'post-make' => 'make test'},
+ git => {'no-configure' => 1,
+	 'make-parameter' => [qw|prefix=/usr|],
+	 'make-install-parameter' => [qw|prefix=/usr|]},
+ libxml2 => {'post-make' => 'make tests'},
+ python => {switch => [qw/--enable-shared/]},
+ iproute2 => {'make-install-parameter' => [qw|DESTDIR=/usr|]},
+ screen => {'pre-configure' => './autogen.sh'},
+ wget => {switch => [qw/--with-ssl=openssl/]},
+ 'man-pages' => {'no-configure' => 1,
+		 'no-make' => 1},
+ kmod => {'post-make-install' => <<'EOF'},
+for i in lsmod modprobe depmod modinfo insmod rmmod; do
+	ln -s /bin/kmod /sbin/$i
+done
+EOF
+ kbd => {'pre-configure' => './autogen.sh',
+	 switch => [qw/--disable-vlock/]},
+ lynx => {switch => [qw/--with-ssl --with-screen=ncursesw/],
+	  'post-make-install' => <<'EOF'},
+make install-help
+make install-doc
+EOF
+ sysvinit => {'no-configure' => 1},
+ emacs => {switch => [qw/--without-x --with-file-notification=inotify/]},
+ syslinux => {'no-configure' => 1,
+	      'make-parameter' => [qw/bios/],
+	      'make-install-parameter' => [qw|bios INSTALLROOT=/usr|]},
+ pixman => {'post-make' => 'make check'},
+ glib => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh',
+	  switch => [qw/--with-pcre=internal/]},
+ freetype => {'pre-configure' => './autogen.sh'},
+ cairo => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ mesa => {switch => [qw/--with-egl-platforms=x11,drm --with-dri-drivers=i965 --with-gallium-drivers=nouveau --enable-gbm --enable-shared-glapi --enable-glx-tls/]},
+ strace => {'pre-configure' => './bootstrap'},
+ libuv => {'pre-configure' => './autogen.sh'},
+ 'gobject-introspection' => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ zip => {'no-configure' => 1,
+	 'make-parameter' => [qw|generic_gcc -f unix/Makefile|],
+	 'make-install-parameter' => [qw|prefix=/usr install -f unix/Makefile|]},
+ unzip => {'no-configure' => 1,
+	   'make-parameter' => [qw|generic -f unix/Makefile|],
+	   'make-install-parameter' => [qw|prefix=/usr install -f unix/Makefile|]},
+ 'gdk-pixbuf' => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ 'gtk+' => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ 'atk' => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ 'pango' => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ 'XML-Parser' => {'no-configure' => 1,
+		  'post-configure' => 'perl Makefile.PL',
+		  'post-make' => 'make test'},
+ 'terminus-font' => {switch => [qw|--x11dir=/share/fonts/X11/terminus|]},
+ x264 => {switch => [qw/--enable-static --enable-shared/]},
+ ffmpeg => {switch => [qw/--enable-gpl --enable-nonfree --enable-libass --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libx264 --enable-openssl --enable-x11grab/]},
+ libpng => {environment => {LIBS => '-lpthread'}},
+ wireshark => {switch => [qw/--with-gtk2 --enable-setuid-install --with-ssl/]},
+ qemu => {switch => [qw/--audio-drv-list=alsa/]},
+ libfaketime => {'no-configure' => 1,
+		 'make-parameter' => ['PREFIX=/usr'],
+		 'make-install-parameter' => ['PREFIX=/usr']},
+ qt5 => {'no-configure' => 1,
+	 'post-configure' => './configure -prefix /lib/qt5 -release -opensource -confirm-license -nomake tests -nomake examples -no-dbus'},
+ mutt => {switch => [qw/--enable-hcache --with-ssl --enable-imap/]},
+ bc => {switch => ['--with-readline']},
+ 'poppler-data' => {'no-configure' => 1,
+		    'no-make' => 1,
+		    'make-install-parameter' => ['prefix=/usr']},
+ luajit => {'no-configure' => 1,
+	    'make-parameter' => ['PREFIX=/usr'],
+	    'make-install-parameter' => ['PREFIX=/usr']},
+ libtirpc => {switch => ['--disable-gssapi']},
+ rpcbind => {switch => ['--without-systemdsystemunitdir']},
+ 'nfs-utils' => {switch => [qw/--disable-gss --disable-nfsv4 --without-tcp-wrappers/]},
+ 'pkg-config' => {switch => [qw/--with-internal-glib/]}}
