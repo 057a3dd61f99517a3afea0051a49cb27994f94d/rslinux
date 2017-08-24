@@ -108,4 +108,6 @@ EOF
  libtirpc => {switch => ['--disable-gssapi']},
  rpcbind => {switch => ['--without-systemdsystemunitdir']},
  'nfs-utils' => {switch => [qw/--disable-gss --disable-nfsv4 --without-tcp-wrappers/]},
+ git => {'make-parameter' => [qw/all doc/],
+	 'make-install-parameter' => [qw/install-doc install-html/]},
  'pkg-config' => {switch => [qw/--with-internal-glib/]}}
