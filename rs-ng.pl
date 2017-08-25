@@ -26,102 +26,6 @@ our @A = qw/c cxs rs/;
 
 main();
 
-=c
-sub rs_parse2 {
-	mmap(shift, my $b);
-	my ($i, @s, $v) = (0, {});
-	my $max = 0;
-	while (@s) {
-		$max = @s if @s > $max;
-		my $s = $s[-1];
-		if (not $s->{v}) {
-			my ($t, $l) = unpack 'aL', substr $b, $i, 5;
-			$i += 5;
-			if ($t eq 'S') {
-				# regular file content.
-				if ($s->{c})	{ $v = [\$b, $l, $i] }
-				else		{ $v = substr $b, $i, $l }
-				$i += $l;
-				pop @s;
-			} else {
-				if ($l)	{ @$s{qw/v l st/} = ({}, $l, 'rk'); push @s, {} }
-				else	{ $v = {}; pop @s }
-			}
-		} else {
-			if ($s->{st} eq 'rk') {
-				@$s{qw/k st/} = ($v, 'rv');
-				push @s, {c => $v eq 'c'};
-			} else {
-				$s->{v}{$s->{k}} = $v;
-				if ($s->{l} -= 1)	{ $s->{st} = 'rk'; push @s, {} }
-				else			{ $v = $s->{v}; pop @s }
-			}
-		}
-	}
-	say "max depth: $max.";
-	$v;
-}
-sub rs_parse_wrap {
-	my $f = shift;
-	my $cp = {b => undef,
-		  p => 0};
-	mmap($f, $cp->{b});
-	rs_parse($cp);
-}
-sub rs_parse {
-	my ($cp, $vp) = @_;
-	my ($k, $t, $l, $v) = ($vp->{k} // "",
-			       substr($cp->{b}, $cp->{p}, 1),
-			       unpack "L", substr $cp->{b}, $cp->{p}+1, 4);
-	$cp->{p} += 5;
-	if ($t eq "S") {
-		if ($k eq "c") {
-			$v = {s => \$cp->{b},
-			      l => $l,
-			      o => $cp->{p}};
-		} else {
-			$v = substr $cp->{b}, $cp->{p}, $l;
-		}
-		$cp->{p} += $l;
-	} else {
-		$v = {};
-		while ($l--) {
-			my $k = rs_parse($cp);
-			$v->{$k} = rs_parse($cp, {k => $k});
-		}
-	}
-	$v;
-}
-sub rs_unparse {
-	my ($cp, $vp) = @_;
-	my ($v, $k) = ($vp->{v}, $vp->{k} // "");
-	if ($k eq "c" and (not ref $v or ref $v->{s} eq "SCALAR")) {
-		if (ref $v) {
-			print {$cp->{sink}} "S" . pack "L", $v->{l};
-			print {$cp->{sink}} substr ${$v->{s}}, $v->{l}, $v->{o};
-		} else {
-			if (mmap($v, my $b)) {
-				print {$cp->{sink}} "S" . pack "L", length $b;
-				print {$cp->{sink}} $b;
-				munmap($b, length $b);
-			} else {
-				print {$cp->{sink}} "S" . pack "L", 0;
-			}
-		}
-	} else {
-		if (not ref $vp->{v}) {
-			print {$cp->{sink}} "S" . pack("L", length $v) . $v;
-		} else {
-			print {$cp->{sink}} "H" . pack "L", ~~keys %$v;
-			for (keys %$v) {
-				rs_unparse($cp, {v => $_});
-				rs_unparse($cp, {v => $v->{$_},
-						 k => $_});
-			}
-		}
-	}
-}
-=cut
 sub set {
 	my ($f, $mode, $uid, $gid, $mtime) = @_;
 	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
@@ -129,11 +33,8 @@ sub set {
 }
 sub equiv {
 	my ($p, $q) = @_;
-	my $f = 1;
-	for (qw/mode uid gid size mtime hl sl/) {
-		$f = 0, last if ($p->{$_} // "") ne ($q->{$_} // "");
-	}
-	$f;
+	no warnings 'uninitialized';
+	not grep { $p->{$_} ne $q->{$_} } qw/mode uid gid size mtime hl sl/;
 }
 sub elf {
 	my ($f, $v) = shift;
@@ -148,7 +49,7 @@ sub strip {
 	if (/\.[ao]$/)						{ @$s{qw/strip archive/} = (1, 1) }
 	elsif ((/\.so/ or $m->{mode} & 0111) and elf($f))	{ $s->{strip} = 1 }
 	if ($s->{strip}) {
-		xsh(0, "strip", $s->{archive} ? "--strip-unneeded" : (), $f);
+		xsh(0, 'strip', $s->{archive} ? '--strip-unneeded' : (), $f);
 		say "strip on $f, st: $?.";
 		if (not $?) {
 			set($f, @$m{qw/mode uid gid mtime/});
@@ -189,7 +90,7 @@ sub diff {
 				$p->{c} = {} if not $p->{c};
 				my $c = diff($cp, {db => $p->{c},
 						   ign => $vp->{ign}{$_},
-						   d => $r . "/"});
+						   d => $r . '/'});
 				if ($st->{ne} or %$c) {
 					$v->{$_} = {%$m,
 						    c => $c};
@@ -224,7 +125,7 @@ sub patch {
 			my $p = $db->{$_};
 			patch($cp, {v => $q->{c},
 				    db => $p->{c},
-				    d => $r . "/"});
+				    d => $r . '/'});
 			set($f, @$p{qw/mode uid gid mtime/}) if not $p->{owner};
 			$p->{owner}{$cp->{oid}} = $cp->{ts};
 		} else {
@@ -282,7 +183,7 @@ sub rm {
 		if ($p->{c}) {
 			if ($o->{$cp->{oid}}) {
 				rm($cp, {db => $p->{c},
-					 d => $r . "/"});
+					 d => $r . '/'});
 				delete $o->{$cp->{oid}};
 				if (not %$o) {
 					rmdir $f or die "unable to rmdir $f: $!.";
@@ -329,7 +230,7 @@ sub priv {
 		setresuid($uid, $uid, 0);
 	} else {
 		setresuid(0, 0, 0);
-		($(, $)) = (0, "0 0");
+		($(, $)) = (0, '0 0');
 	}
 }
 sub tag {
@@ -341,39 +242,47 @@ sub tag {
 		if ($p->{c}) {
 			$v->{$_} = {%$p,
 				    c => tag($cp, {db => $p->{c},
-						   d => $r . "/"})} if $p->{owner}{$oid};
+						   d => $r . '/'})} if $p->{owner}{$oid};
 		} else {
 			$v->{$_} = $p, say {$cp->{sink}} $r if $p->{owner}{record}{$oid};
 		}
 	}
 	$v;
 }
+sub confirm () {
+	chomp(my $a = <STDIN>);
+	exit unless $a;
+}
 sub main {
-	my $p = do "$ENV{HOME}/.rs.profile" // {};
+	my $s;
+	do {
+		my $c = arg_parse();
+		$s = $c->{profile} ? do $c->{profile} : do "$ENV{HOME}/.rs.profile" || {};
+		add($s, %$c);
+	};
+	print 'run-time config: ', json_unparse_readable($s);
+	# mod tells us whether the database is modified.
+	my ($db, $mod) = rs_parse($s->{db});
 	while (@ARGV) {
-		my $s = arg_parse();
-		$p = do $s->{profile} if $s->{profile};
-		$s = {%$p,
-		      %$s};
 		my $op = shift @ARGV;
-		my $db = rs_parse($s->{db}) if $op =~ /^(diff|patch|rm|tag)$/;
-		if ($op eq "diff") {
-			my ($oid, $root) = splice @ARGV, 0, 2;
-			my ($p, $_v) = $s->{pool} . $oid . ".rs";
+		if ($op eq 'diff') {
+			my $oid = shift @ARGV;
+			my ($p, $_v) = $s->{pool} . $oid . '.rs';
 			if (-e $p) {
 				say "$p exists, will merge with new generated patch tree.";
 				$_v = rs_parse($p);
 			}
 			my $v = diff({ih => {},
-				      root => $root,
+				      root => $s->{root},
 				      oid => $oid,
 				      ts => time}, {db => $db,
 						    ign => $s->{ign} ? do $s->{ign} : undef,
-						    d => ""});
+						    d => ''});
+			$mod = 1;
 			merge($v, $_v) if $_v;
 			rs_unparse($v, fileno wf($p));
 		} elsif ($op eq 'patch') {
-			my ($f, $root) = splice @ARGV, 0, 2;
+			my $f = shift @ARGV;
 			#   v is the parsed value of the patch, and can be cut using subtree switch,
 			# the final patch to apply is stored in p.
 			my $v = my $p = rs_parse($f);
@@ -382,36 +291,38 @@ sub main {
 				grow($p, $v, $_) for flatten($s->{subtree});
 			}
 			my ($oid) = $f =~ m|([^/]*).rs$|;
-			patch({root => $root,
+			patch({root => $s->{root},
 			       oid => $oid,
 			       ts => time}, {v => $p,
 					     db => $db,
 					     d => ''});
-		} elsif ($op eq "rm") {
-			my ($oid, $root) = splice @ARGV, 0, 2;
-			rm({root => $root,
+			$mod = 1;
+		} elsif ($op eq 'remove') {
+			my $oid = shift @ARGV;
+			rm({root => $s->{root},
 			    oid => $oid,
 			    pool => $s->{pool},
 			    patch => my $p = {}}, {db => $db,
-						   d => ""});
+						   d => ''});
+			$mod = 1;
 			my $ts = time;
 			for (keys %$p) {
-				patch({root => $root,
+				patch({root => $s->{root},
 				       oid => $_,
 				       ts => $ts}, {v => $p->{$_}{p},
 						    db => $db,
-						    d => ""});
+						    d => ''});
 			}
-		} elsif ($op eq "compile") {
+		} elsif ($op eq 'compile') {
 			# drop root privilege before compile, as suggested by many packages.
 			priv(0);
-			my ($p, $oid, $pkg, $d) = shift @ARGV;
-			if (-d $p) {
-				$oid = $s->{oid} or die "oid not specified for $p.";
+			my ($p, $oid, $pkg, $d, $git) = shift @ARGV;
+			if ($git = -d $p) {
+				$oid = shift @ARGV;
 				$d = $p;
 			} else {
 				($oid) = $p =~ m|([^/]*).tar.*$|;
-				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die "bad tarball.";
+				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
 			}
 			($pkg) = $oid =~ m|(.*)-|;
 			my $_d = readlink '/proc/self/cwd' or die "readlink: $!.";
@@ -420,24 +331,24 @@ sub main {
 			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
 			unless ($b->{'no-configure'}) {
 				local %ENV = %ENV;
-				xsh(0, qw/autoreconf -iv/) or die "autoreconf failed." unless -e 'configure';
+				xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
 				my @p;
 				if ($s->{bootstrap}) {
-					$ENV{CPPFLAGS} = "-I/p/include" unless $b->{'no-cppflags'};
+					$ENV{CPPFLAGS} = '-I/p/include' unless $b->{'no-cppflags'};
 					$ENV{LDFLAGS} = '-L/p/lib -Wl,-I' . ($s->{i386} ?
 									     '/p/lib/ld-linux.so.2' : $s->{arm} ?
 									     '/p/lib/ld-linux-armhf.so.3' :
 									     '/p/lib/ld-linux-x86-64.so.2');
-					push @p, "--prefix=/p";
+					push @p, '--prefix=/p';
 				} else {
-					push @p, "--prefix=/usr";
+					push @p, '--prefix=/usr';
 				}
 				my $e = $b->{environment};
 				$ENV{$_} = $e->{$_} for keys %$e;
-				xsh(0, "./configure", @{$b->{switch}}, @p,
+				xsh(0, './configure', @{$b->{switch}}, @p,
 				    {to => *STDERR,
 				     from => *STDOUT,
-				     mode => ">"}, qw/| less -KR/) or die "configure failed.";
+				     mode => '>'}, qw/| less -KR/) or die 'configure failed.';
 			}
 			xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
 			xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
@@ -445,29 +356,37 @@ sub main {
 			priv(1);
 			xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.';
 			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
-			xsh(0, qw/git clean -fdx/) if $s->{oid};
+			my $cwd = readlink '/proc/self/cwd' or die $!;
+			# do some cleaning.
+			if ($git) {
+				say "will 'git clean -fdx' on $cwd.";
+				confirm;
+				xsh(0, qw/git clean -fdx/);
+			} else {
+				# remove uncompressed tarball.
+				say "will 'rm -rf ../$d' on $cwd.",
+				confirm;
+				xsh(0, qw/rm -rf/, "../$d");
+			}
 			chdir $_d or die "chdir $_d: $!.";
-			# remove uncompressed tarball.
-			xsh(0, qw/rm -rf/, $d) if not $s->{oid};
-			push @ARGV,
-			"diff", $oid, $s->{bootstrap} ? "/p/" : "/",
-			"tag", $oid;
+			# the next steps.
+			push @ARGV, 'diff', $oid, 'tag', $oid;
 		} elsif ($op eq 'tag') {
-			my $oid = shift @ARGV;
-			pipe my $r, my $w or die $!;
-			my $pid = xsh({asynchronous => 1}, qw/less -R/, {to => *STDIN,
-									 from => $r,
-									 mode => '<'});
-			close $r;
-			_json_unparse({readable => 1,
-				       sink => $w}, {v => tag({oid => $oid,
-							       sink => $w}, {db => $db,
-									     d => ''}),
-						     d => 0});
-			close $w;
+			my ($oid, $pid) = shift @ARGV;
+			do {
+				pipe my $r, my $w or die $!;
+				$pid = xsh({asynchronous => 1},
+					   qw/less -R/, {to => *STDIN,
+							 from => $r,
+							 mode => '<'});
+				close $r;
+				print $w json_unparse_readable(tag({oid => $oid,
+								    sink => $w}, {db => $db,
+										  d => ''}));
+			};
 			# we must wait here or we will lose control-terminal.
 			waitpid $pid, 0;
 		}
-		rs_unparse($db, fileno wf($s->{db})) if $op =~ /^(diff|patch|rm)$/;
 	}
+	rs_unparse($db, fileno wf($s->{db})) if $mod;
 }
