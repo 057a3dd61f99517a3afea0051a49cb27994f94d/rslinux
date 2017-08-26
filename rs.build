@@ -110,4 +110,7 @@ EOF
  'nfs-utils' => {switch => [qw/--disable-gss --disable-nfsv4 --without-tcp-wrappers/]},
  git => {'make-parameter' => [qw/all doc/],
 	 'make-install-parameter' => [qw/install-doc install-html/]},
+ pciutils => {'no-configure' => 1,
+	      'make-parameter' => ['PREFIX=/usr'],
+	      'make-install-parameter' => ['PREFIX=/usr']},
  'pkg-config' => {switch => [qw/--with-internal-glib/]}}
