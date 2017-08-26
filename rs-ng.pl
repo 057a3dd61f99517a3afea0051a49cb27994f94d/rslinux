@@ -1,4 +1,4 @@
-#!/bin/perl -w
+#!/usr/bin/env perl
 =license
 
 	Copyright © 2018 Yang Bo
@@ -19,10 +19,7 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use strict;
-use c 'constant';
-use feature qw/say state/;
-our @A = qw/c cxs rs/;
+use c 'autoload' => [qw/dot c cxs rs/], 'constant', 'sane';
 
 main();
 

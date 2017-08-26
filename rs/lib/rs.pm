@@ -19,8 +19,7 @@
 
 =cut
 package rs;
-use strict;
-use warnings;
+use c 'sane';
 use XSLoader;
 XSLoader::load();
 1;
