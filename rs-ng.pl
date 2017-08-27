@@ -19,7 +19,7 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use c 'autoload' => [qw/dot c cxs rs/], 'constant', 'sane';
+use c iautoload => [qw/c cxs rs dot/], 'constant', 'sane';
 
 main();
 
