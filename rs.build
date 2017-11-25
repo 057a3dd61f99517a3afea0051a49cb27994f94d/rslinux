@@ -88,7 +88,7 @@ EOF
 		  'post-make' => 'make test'},
  'terminus-font' => {switch => [qw|--x11dir=/share/fonts/X11/terminus|]},
  x264 => {switch => [qw/--enable-static --enable-shared/]},
- ffmpeg => {switch => [qw/--enable-gpl --enable-nonfree --enable-libass --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libx264 --enable-openssl --enable-x11grab/]},
+ ffmpeg => {switch => [qw/--enable-gpl --enable-nonfree --enable-libass --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libx264 --enable-libx265 --enable-shared --enable-openssl/]},
  libpng => {environment => {LIBS => '-lpthread'}},
  wireshark => {switch => [qw/--with-gtk2 --enable-setuid-install --with-ssl/]},
  qemu => {switch => [qw/--audio-drv-list=alsa/]},
@@ -113,4 +113,9 @@ EOF
  pciutils => {'no-configure' => 1,
 	      'make-parameter' => ['PREFIX=/usr'],
 	      'make-install-parameter' => ['PREFIX=/usr']},
+ librsvg => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh'},
+ gimp => {'pre-configure' => 'NOCONFIGURE=1 ./autogen.sh',
+	  switch => [qw'--disable-python --without-gvfs']},
+ samba => {switch => [qw|--enable-fhs --sysconfdir=/etc --localstatedir=/var --without-ad-dc --without-acl-support --without-ldap --without-ads|]},
+ fftw => {switch => [qw/--enable-shared --enable-threads/]},
  'pkg-config' => {switch => [qw/--with-internal-glib/]}}
