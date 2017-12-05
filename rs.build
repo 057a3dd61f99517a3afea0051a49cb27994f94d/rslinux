@@ -118,4 +118,6 @@ EOF
 	  switch => [qw'--disable-python --without-gvfs']},
  samba => {switch => [qw|--enable-fhs --sysconfdir=/etc --localstatedir=/var --without-ad-dc --without-acl-support --without-ldap --without-ads|]},
  fftw => {switch => [qw/--enable-shared --enable-threads/]},
+ squid => {'pre-configure' => './bootstrap.sh',
+	   switch => [qw/--with-openssl --enable-ssl-crtd/]},
  'pkg-config' => {switch => [qw/--with-internal-glib/]}}
