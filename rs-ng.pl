@@ -361,7 +361,7 @@ sub main {
 				xsh(0, qw/git clean -fdx/);
 			} else {
 				# remove uncompressed tarball.
-				say "will 'rm -rf ../$d' on $cwd.",
+				say "will 'rm -rf ../$d' on $cwd.";
 				confirm;
 				xsh(0, qw/rm -rf/, "../$d");
 			}
