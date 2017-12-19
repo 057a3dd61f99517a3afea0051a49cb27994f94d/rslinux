@@ -18,5 +18,10 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use ExtUtils::MakeMaker;
-WriteMakefile(NAME => 'rs');
+use c 'sane', iautoload => ['ExtUtils::MakeMaker', 'Devel::PPPort'];
+WriteFile();
+my $h = $ENV{HOME};
+WriteMakefile(
+	NAME => 'rs',
+	CCFLAGS => "-I$h/mp",
+    );
