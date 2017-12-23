@@ -324,7 +324,7 @@ sub main {
 			($pkg) = $oid =~ m|(.*)-|;
 			my $_d = readlink '/proc/self/cwd' or die "readlink: $!.";
 			chdir $d or die "chdir $d: $!.";
-			my $b = (do $s->{build})->{$pkg};
+			my $b = (do $s->{build})->($s)->{$pkg};
 			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
 			unless ($b->{'no-configure'}) {
 				local %ENV = %ENV;
