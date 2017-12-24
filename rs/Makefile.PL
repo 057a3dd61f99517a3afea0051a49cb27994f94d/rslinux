@@ -23,5 +23,5 @@ WriteFile();
 my $h = $ENV{HOME};
 WriteMakefile(
 	NAME => 'rs',
-	CCFLAGS => "-I$h/mp",
+	INC => "-I$h/mp",
     );
