@@ -377,6 +377,7 @@ sub main {
 							 from => $r,
 							 mode => '<'});
 				close $r;
+				local $SIG{PIPE} = 'IGNORE';
 				print $w json_unparse_readable(tag({oid => $oid,
 								    sink => $w}, {db => $db,
 										  d => ''}));
