@@ -20,6 +20,11 @@
 =cut
 sub {
 	my $s = shift;
+	my $ld = sub {
+		$s->{i386} ? '/p/lib/ld-linux.so.2' :
+		    $s->{arm} ? '/p/lib/ld-linux-armhf.so.3' :
+		    '/p/lib/ld-linux-x86-64.so.2';
+	};
 	my $prefix = $s->{bootstrap} ? '/p' : '/usr';
 	{glibc => {switch => ['--enable-obsolete-rpc'],
 		   'separate-build' => 1},
@@ -32,8 +37,8 @@ sub {
 	 ncursesw => {switch => ["--includedir=$prefix/include/ncursesw", qw|--with-shared --enable-widec --disable-db-install --without-manpages --without-progs --without-debug|]},
 	 bash => {switch => [qw/--with-curses/]},
 	 perl => {'no-configure' => 1,
-		      'post-configure' => './Configure -de -Dprefix=/usr',
-		      'post-make' => 'make test'},
+		      'post-configure' => $s->{bootstrap} ? './Configure -de -Dprefix=/p -Accflags=-I/p/include -Aldflags="-L/p/lib -Wl,-I' . $ld->() . '"' : './Configure -de -Dprefix=/usr',
+		      'post-make' => $s->{bootstrap} ? undef : 'make test'},
 	 bzip2 => {'no-configure' => 1,
 		       'make-install-parameter' => [qw|PREFIX=/usr|]},
 	 'man-db' => {switch => [qw/--disable-setuid/]},
