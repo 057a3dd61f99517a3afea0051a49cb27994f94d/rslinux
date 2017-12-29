@@ -315,13 +315,14 @@ sub main {
 			priv(0);
 			my ($p, $oid, $pkg, $d, $git) = shift @ARGV;
 			if ($git = -d $p) {
-				$oid = shift @ARGV;
-				$d = $p;
+				mkdir $d = $oid = shift @ARGV or die $!;
+				xsh(0, qw/git clone --shared/, '--branch=' . ($s->{'git-branch'} || $oid),
+				    $p, $d);
 			} else {
 				($oid) = $p =~ m|([^/]*).tar.*$|;
 				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
 			}
-			($pkg) = $oid =~ m|(.*)-|;
+			($pkg) = $s->{package} || $oid =~ m|(.*)-|;
 			my $_d = readlink '/proc/self/cwd' or die "readlink: $!.";
 			chdir $d or die "chdir $d: $!.";
 			my $b = (do $s->{build})->($s)->{$pkg};
@@ -355,21 +356,16 @@ sub main {
 			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
 			my $cwd = readlink '/proc/self/cwd' or die $!;
 			# do some cleaning.
-			if ($git) {
-				say "will 'git clean -fdx' on $cwd.";
-				confirm;
-				xsh(0, qw/git clean -fdx/);
-			} else {
-				# remove uncompressed tarball.
-				say "will 'rm -rf ../$d' on $cwd.";
-				confirm;
-				xsh(0, qw/rm -rf/, "../$d");
-			}
+			say "will 'rm -rf ../$d' on $cwd.";
+			confirm;
+			xsh(0, qw/rm -rf/, "../$d");
+			# return to where we started.
 			chdir $_d or die "chdir $_d: $!.";
 			# the next steps.
 			push @ARGV, 'diff', $oid, 'tag', $oid;
 		} elsif ($op eq 'tag') {
 			my ($oid, $pid) = shift @ARGV;
+			local $SIG{PIPE} = 'IGNORE';
 			do {
 				pipe my $r, my $w or die $!;
 				$pid = xsh({asynchronous => 1},
@@ -377,7 +373,6 @@ sub main {
 							 from => $r,
 							 mode => '<'});
 				close $r;
-				local $SIG{PIPE} = 'IGNORE';
 				print $w json_unparse_readable(tag({oid => $oid,
 								    sink => $w}, {db => $db,
 										  d => ''}));
