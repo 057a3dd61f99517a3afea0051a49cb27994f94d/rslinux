@@ -356,9 +356,11 @@ sub main {
 			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
 			my $cwd = readlink '/proc/self/cwd' or die $!;
 			# do some cleaning.
-			say "will 'rm -rf ../$d' on $cwd.";
-			confirm;
-			xsh(0, qw/rm -rf/, "../$d");
+			unless ($s->{'no-rm'}) {
+				say "will 'rm -rf ../$d' on $cwd.";
+				confirm;
+				xsh(0, qw/rm -rf/, "../$d");
+			}
 			# return to where we started.
 			chdir $_d or die "chdir $_d: $!.";
 			# the next steps.
