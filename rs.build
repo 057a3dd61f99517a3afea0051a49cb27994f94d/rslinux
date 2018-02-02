@@ -41,6 +41,7 @@ sub {
 		      'post-make' => $s->{bootstrap} ? undef : 'make test'},
 	 bzip2 => {'no-configure' => 1,
 		       'make-install-parameter' => [qw|PREFIX=/usr|]},
+	 zlib => {environment => $s->{bootstrap} ? {CFLAGS => '-I/p/include'} : undef},
 	 'man-db' => {switch => [qw/--disable-setuid/]},
 	 openssl => {'no-configure' => 1,
 			 'post-configure' => './config --prefix=/usr --openssldir=/share/openssl shared',
