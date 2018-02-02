@@ -316,7 +316,7 @@ sub main {
 			my ($p, $oid, $pkg, $d, $git) = shift @ARGV;
 			if ($git = -d $p) {
 				mkdir $d = $oid = shift @ARGV or die $!;
-				xsh(0, qw/git clone --shared/, '--branch=' . ($s->{'git-branch'} || $oid),
+				xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
 				    $p, $d);
 			} else {
 				($oid) = $p =~ m|([^/]*).tar.*$|;
