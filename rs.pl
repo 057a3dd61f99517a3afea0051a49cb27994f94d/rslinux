@@ -1,4 +1,4 @@
-#!/bin/perl -w
+#!/usr/bin/env perl
 =license
 
 	Copyright © 2018 Yang Bo
@@ -19,797 +19,369 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-# dedicated to Robert Schumann.
-use strict;
-use c;
+use c iautoload => [qw/c cxs rs dot/], 'constant', 'sane';
 
-my %filetype = (
-	0140000 => "socket",
-	0120000 => "symbolic link",
-	0100000 => "regular file",
-	0060000 => "block device",
-	0040000 => "directory",
-	0020000 => "character device",
-	0010000 => "fifo"
-    );
-BEGIN {
-	$SIG{__WARN__} = sub {
-		return if $_[0] =~ /^Possible attempt to separate words with commas/;
-		warn @_;
-	};
-}
-my %B = (
-	gcc => {
-		switch => [qw/--disable-bootstrap --enable-languages=c,c++ --disable-multilib/]
-	},
-	ncurses => {
-		switch => [qw/--enable-widec --with-shared/],
-	},
-	bash => {
-		switch => [qw/--with-curses/],
-	},
-	"pkg-config" => {
-		switch => [qw/--with-internal-glib/],
-	},
-	Python => {
-		switch => [qw/--enable-shared/],
-	},
-	kbd => {
-		switch => [qw/--disable-vlock/],
-	},
-	wget => {
-		switch => [qw/--with-ssl=openssl --with-openssl/],
-	},
-	lynx => {
-		switch => [qw/--enable-ipv6 --with-ssl --with-screen=ncursesw/],
-	},
-	"alsa-utils" => {
-		switch => [qw/--disable-xmlto/],
-	},
-	# https://www.freedesktop.org/wiki/Software/Glamor/
-	mesa => {
-		switch => [qw/--with-egl-platforms=x11,drm --with-dri-drivers=i965 --with-gallium-drivers= --enable-gbm --enable-glx-tls/],
-	},
-	"xorg-server" => {
-		switch => [qw|--with-fontrootdir=/share/fonts/X11 --enable-glamor|],
-		postmi => 'chmod u+s /bin/Xorg',
-	},
-	libtirpc => {
-		switch => [qw/--disable-gssapi/],
-	},
-	"nfs-utils" => {
-		switch => [qw/--disable-gss --disable-nfsv4 --without-tcp-wrappers/],
-	},
-	emacs => {
-		switch => [qw/--without-x --with-file-notification=inotify/],
-	},
-	ffmpeg => {
-		switch => [qw/--enable-libfreetype --enable-libx264 --enable-gpl --enable-x11grab/]
-	},
-	qemu => {
-		switch => [qw|--extra-cflags=-I/include/ncursesw --cc=gcc --target-list=i386-softmmu,x86_64-softmmu,arm-linux-user --audio-drv-list=alsa|],
-	},
-	"procps-ng" => {
-		env => { CPPFLAGS => "-I/include/ncursesw" },
-	},
-	psmisc => {
-		env => { CPPFLAGS => "-I/include/ncursesw" },
-	},
-	"man-pages" => {
-		noc => 1,
-		nomk => 1,
-	},
-	kmod => {
-		postmi => 'for i in {lsmod,rmmod,insmod,modinfo,modprobe,depmod}; do ln -s /bin/kmod /sbin/$i; done',
-	},
-	pciutils => {
-		noc => 1,
-		miparam => ["PREFIX=/"],
-	},
-	"XML-Parser" => {
-		noc => 1,
-		postc => 'perl Makefile.PL',
-	},
-	sysvinit => {
-		noc => 1,
-		mkparam => ["CC=gcc"],
-	},
-	dosfstools => {
-		noc => 1,
-		mkparam => ["CC=gcc"],
-		miparam => ["PREFIX=/"],
-	},
-	rtmpdump => {
-		noc => 1,
-		mkparam => ["SYS=posix"],
-		miparam => ["prefix=/"]
-	},
-	wine => {
-		env => { CPPFLAGS => "-I/include/ncursesw" },
-	},
-	syslinux => {
-		noc => 1,
-		miparam => ["INSTALLROOT=/"],
-	},
-	"terminus-font" => {
-		switch => ["--x11dir=/share/fonts/X11/terminus"],
-		postmi => 'mkfontdir /share/fonts/X11/terminus'
-	},
-	"poppler-data" => {
-		noc => 1,
-		nomk => 1,
-		miparam => ["prefix=/"]
-	},
-	unrarsrc => {
-		noc => 1,
-		miparam => ["DESTDIR=/"]
-	},
-	unzip => {
-		noc => 1,
-		mkparam => [qw|CC=gcc generic -f unix/Makefile|],
-		miparam => [qw|prefix=/ install -f unix/Makefile|]
-	},
-	zip => {
-		noc => 1,
-		mkparam => [qw|generic_gcc -f unix/Makefile|],
-		miparam => [qw|prefix=/ install -f unix/Makefile|]
-	},
-	firefox => {
-		switch => [qw/--disable-dbus --disable-pulseaudio --disable-gstreamer --disable-necko-wifi/]
-	},
-	wireshark => {
-		switch => [qw/--with-qt --with-gtk2 --enable-setuid-install/]
-	},
-	x264 => {
-		switch => [qw/--enable-static --enable-shared/]
-	},
-	cdrtools => {
-		noc => 1,
-		mkparam => ["CCOM=gcc"],
-		miparam => ["INS_BASE=/"]
-	},
-	gnutls => {
-		switch => [qw/--with-included-libtasn1 --without-p11-kit/]
-	},
-	wxWidgets => {
-		switch => [qw/--enable-compat28/]
-	},
-	cryptopp => {
-		noc => 1,
-		miparam => ["PREFIX=/"]
-	},
-	amule => {
-		switch => [qw/--enable-amule-daemon --enable-amulecmd --enable-webserver --enable-amule-gui --disable-debug --enable-optimize --enable-alc --enable-alcc --enable-geoip/]
-	},
-	gnuplot => {
-		switch => [qw/--enable-qt/]
-	},
-	mupdf => {
-		noc => 1,
-		mkparam => ["CC=gcc"],
-		miparam => ["prefix=/"]
-	},
-	"proxychains-ng" => {
-		mkparam => ["CC=gcc"]
-	},
-	"mutt" => {
-		switch => ["--with-mailpath=/tmp"]
-	}
-    );
-=c
-qt5:
-	./configure -prefix / -opensource -nomake tests -qt-xcb -no-dbus
-=cut
+main();
 
-sub pson_unparse {
-	my $a = shift;
-	my $ans;
-	if (ref $a eq "ARRAY") {
-		$ans .= "A" . pack("L", ~~@$a);
-		$ans .= pson_unparse($_) for (@$a);
-	} elsif (ref $a eq "HASH") {
-		$ans .= "H" . pack("L", ~~keys %$a);
-		$ans .= pson_unparse($_) . pson_unparse($a->{$_}) for (keys %$a);
-	} else {
-		$ans .= "S" . pack("L", length($a)) . $a;
-	}
-	return $ans;
+sub set {
+	my ($f, $mode, $uid, $gid, $mtime) = @_;
+	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
+	chown $uid, $gid, $f and chmod $mode & 07777, $f and utimensat($f, $mtime) or die "$f: $!";
 }
-sub pson_unparse_w {
-	my ($a, $fh) = @_;
-	if (ref $a eq "ARRAY") {
-		syswrite $fh, "A" . pack("L", ~~@$a);
-		pson_unparse_w($_, $fh) for (@$a);
-	} elsif (ref $a eq "HASH") {
-		syswrite $fh, "H" . pack("L", ~~keys %$a);
-		for (keys %$a) {
-			pson_unparse_w($_, $fh);
-			pson_unparse_w($a->{$_}, $fh);
-		}
-	} elsif (ref $a eq "REF") {
-		my $p = $$a;
-		if ($p->{type} eq "substr") {
-			syswrite $fh, "S" . pack("L", $p->{length});
-			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "write";
-		} elsif ($p->{type} eq "mmap") {
-			if (mmap($p->{f}, my $b)) {
-				syswrite $fh, "S" . pack("L", length($b));
-				syswrite $fh, $b;
-				munmap($b, length($b));
-			} else {
-				syswrite $fh, "S" . pack("L", 0);
-			}
-		}
-	} else {
-		syswrite $fh, "S" . pack("L", length($a)) . $a;
-	}
+sub equiv {
+	my ($p, $q) = @_;
+	no warnings 'uninitialized';
+	not grep { $p->{$_} ne $q->{$_} } qw/mode uid gid size mtime hl sl/;
 }
-sub pson_parse_wrap {
-	my $a = shift;
-	return (pson_parse({strref => \$a}, 0))[0];
+sub elf {
+	my ($f, $v) = shift;
+	mmap($f, my $b);
+	$v = 1 if length $b >= 4 and substr($b, 0, 4) eq "\x7fELF";
+	munmap($b, length $b);
+	$v;
 }
-sub pson_parse {
-	my ($p, $i) = @_;
-	my ($a, $f) = @{$p}{qw/strref flag/};
-	my $t = substr($$a, $i, 1);
-	my $l = unpack("L", substr($$a, $i+1, 4));
-	$i += 5;
-	my $ans;
-	if ($t eq "A") {
-		$ans = [];
-		while ($l--) {
-			my $v;
-			($v, $i) = pson_parse($p, $i);
-			push @$ans, $v;
-		}
-	} elsif ($t eq "H") {
-		$ans = {};
-		while ($l--) {
-			my ($key, $v);
-			($key, $i) = pson_parse({strref => $a}, $i);
-			($v, $i) = pson_parse($p, $i);
-			$ans->{$key} = $v;
-		}
-	} else {
-		if ($f) {
-			my $h = {
-				type => "substr",
-				strref => $a,
-				offset => $i,
-				length => $l
-			};
-			$ans = \$h;
-		} else {
-			$ans = substr($$a, $i, $l);
-		}
-		$i += $l;
-	}
-	return ($ans, $i);
-}
-sub walk {
-	my ($p, $d) = @_;
-	$d = "" unless $d;
-	my $ans = {};
-	opendir(my $dh, $p->{root} . $d) or die $!;
-      p0:
-	for (sort readdir $dh) {
-		next if /^\.{1,2}$/;
-		my ($r, $f) = ($d . $_, $p->{root} . $d . $_);
-		for (@{$p->{exclude}}) {
-			if ($_ eq $r) {
-				print "$f is excluded.\n";
-				next p0;
-			}
-		}
-		$ans->{$_} = {};
-		(my $i, @{$ans->{$_}}{qw/mode uid gid mt/}) = (lstat($f))[1, 2, 4, 5, 9];
-		if ($p->{ih}{$i})	{ $ans->{$_}{hl} = $p->{ih}{$i} }
-		else			{ $p->{ih}{$i} = $r }
-		if (-d _) {
-			if (-x _)	{ $ans->{$_}{c} = walk($p, $r . "/") }
-			else		{ print $f . "/", " is a directory but not executable.\n" }
+sub strip {
+	my ($f, $m, $root) = @_;
+	my $s = {};
+	if (/\.[ao]$/)						{ @$s{qw/strip archive/} = (1, 1) }
+	elsif ((/\.so/ or $m->{mode} & 0111) and elf($f))	{ $s->{strip} = 1 }
+	if ($s->{strip}) {
+		xsh(0, 'strip', $s->{archive} ? '--strip-unneeded' : (), $f);
+		say "strip on $f, st: $?.";
+		if (not $?) {
+			set($f, @$m{qw/mode uid gid mtime/});
+			$m->{size} = (stat $f)[7];
 		}
 	}
-	return $ans;
-}
-# difference of entry.
-sub de {
-	my ($f, $p, $q) = @_;
-	my $d = 0;
-	for (qw/mode uid gid mt hl/) {
-		my ($a, $b) = ($p->{$_} // "", $q->{$_} // "");
-		if ($a ne $b) {
-			$d++;
-			if ($_ eq "mode") {
-				$_ = sprintf "%.7o", $_ for ($a, $b);
-			} elsif ($_ eq "mt") {
-				$_ = localtime($_) for ($a, $b);
-			}
-			print $f, " $_ differs, previous: $a, now: $b.\n";
-		}
-	}
-	$d;
-}
-sub check {
-	my ($p, $h, $d) = @_;
-	$d = "" unless $d;
-	my $ans = {};
-	for (sort keys %$h) {
-		my $r = $d . $_;
-		my $f = $p->{root} . $r;
-		my $e = {};
-		(my $i, @{$e}{qw/mode uid gid mt/}) = (lstat($f))[1, 2, 4, 5, 9];
-		if ($i) {
-			if ($p->{ih}{$i})	{ $e->{hl} = $e->{c} = $p->{ih}{$i} }
-			else			{ $p->{ih}{$i} = $r }
-			if (-d _ and ref $h->{$_}{c} eq "HASH") {
-				$e->{c} = check($p, $h->{$_}{c}, $d . $_ . "/");
-				$ans->{$_} = $e if %{$e->{c}}
-			} else {
-				if (de($f, $h->{$_}, $e)) {
-					$e->{ow} = 1;
-					my $t = $filetype{$e->{mode} & 0170000};
-					$e->{c} = readlink $f if $t eq "symbolic link";
-					$ans->{$_} = $e;
-				}
-			}
-		} else {
-			$ans->{$_} = $h->{$_};
-		}
-	}
-	$ans;
 }
 sub diff {
-	my ($p, $q, $d) = @_;
-	$d = "" unless $d;
-	my $ans = {};
-	for (keys %$q) {
-		my $f = $d . $_;
-		my ($ne, $ow);
-		if ($p and $p->{$_}) {
-			my $tp = $filetype{$p->{$_}{mode} & 0170000};
-			my $tq = $filetype{$q->{$_}{mode} & 0170000};
-			if ($tp eq "directory" and $tq eq "directory") {
-				my $t = diff($p->{$_}{c}, $q->{$_}{c}, $f . "/");
-				if (%$t) {
-					print "$f exist but contents inside differ.\n";
-					$ans->{$_} = {%{$q->{$_}}}, $ans->{$_}{c} = $t;
+	my ($cp, $vp) = @_;
+	my ($db, $v) = ($vp->{db}, {});
+	opendir(my $dh, $cp->{root} . $vp->{d}) or die $!;
+	for (sort readdir $dh) {
+		my $ign = $vp->{ign}{$_};
+		# ignore leaf only.
+		next if /^\.{1,2}$/ or $ign and not ref $ign;
+		my ($r, $f, $m) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, {});
+		(my $i, @$m{qw/mode uid gid size mtime/}) = (lstat $f)[1, 2, 4, 5, 7, 9];
+		if ($cp->{ih}{$i})	{ $m->{hl} = $cp->{ih}{$i} }
+		else			{ $cp->{ih}{$i} = $r }
+		my $t = $m->{mode} & S_IFMT;
+		if ($t == S_IFDIR)	{ delete $m->{size} }
+		elsif ($t == S_IFLNK)	{ $m->{sl} = readlink $f or die $! }
+		elsif ($t != S_IFREG)	{ die "unknown type $t of $f." }
+		my $st = {};
+		if (my $_m = $db->{$_}) {
+			my $_t = $_m->{mode} & S_IFMT;
+			if ($t == S_IFDIR xor $_t == S_IFDIR)	{ ... }
+			elsif ($t == S_IFDIR)			{ $st->{dir} = 1 }
+			else					{ $st->{mod} = 1 if not equiv($m, $_m) }
+		} else {
+			$st->{ne} = 1;
+		}
+		if (%$st) {
+			if ($t == S_IFDIR) {
+				my $p = $db->{$_} = {%$m,
+						     c => $db->{$_}{c},
+						     owner => $db->{$_}{owner}};
+				$p->{c} = {} if not $p->{c};
+				my $c = diff($cp, {db => $p->{c},
+						   ign => $vp->{ign}{$_},
+						   d => $r . '/'});
+				if ($st->{ne} or %$c) {
+					$v->{$_} = {%$m,
+						    c => $c};
+					$p->{owner}{$cp->{oid}} = $cp->{ts};
 				}
 			} else {
-				$ow = de($f, $p->{$_}, $q->{$_});
-			}
-		} else {
-			$ne = 1;
-		}
-		if ($ne or $ow) {
-			print "$f\n";
-			print "\e[36m", "added since it's been overwritten.\n", "\e[m" if $ow;
-			my $c;
-			my $t = $filetype{$q->{$_}{mode} & 0170000};
-			if ($t eq "directory") {
-				$c = diff(undef, $q->{$_}{c}, $f . "/");
-			} elsif ($t eq "regular file") {
-				if ($f =~ /\.la$/) {
-					print "remove la file $f...";
-					if (unlink $f)	{ print "successed.\n" }
-					else		{ print "failed.\n" }
-				} else {
-					if (xsh(1, "file", $f) =~ /(executable|shared object).*not stripped/) {
-						print "trying to strip $f...";
-						xsh(0, "strip", $f);
-						unless ($?) {
-							print "successed.\n";
-							set($f, @{$q->{$_}}{qw/mode uid gid mt/});
-						} else {
-							print "failed.\n";
-						}
-					}
-					if ($q->{$_}{hl})	{ $c = $q->{$_}{hl} }
-					else {
-						my $h = {
-							type => "mmap",
-							f => $f
-						};
-						$c = \$h;
-					}
-				}
-			} elsif ($t eq "symbolic link") {
-				$c = readlink $f or die $!;
-			} else {
-				print "unable to handle file type $t of file $f.\n";
-			}
-			if ($c) {
-				$ans->{$_} = {%{$q->{$_}}, c => $c};
-				$ans->{$_}{ow} = 1 if $ow;
+				my $n = 1 if $t == S_IFREG and not $m->{hl};
+				strip($f, $m) if $n;
+				my $p = $db->{$_} = {%$m,
+						     owner => $db->{$_}{owner}};
+				$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
+				$v->{$_} = {%$m};
+				$v->{$_}{c} = \$f if $n;
 			}
 		}
 	}
-	return $ans;
-}
-sub remove {
-	my ($h, $j, $d) = @_;
-	for (keys %$h) {
-		my $f = $d . $_;
-		my $t = $filetype{$h->{$_}{mode} & 0170000};
-		print "$f\n" unless $t;
-		if ($t eq "directory") {
-			remove($h->{$_}{c}, $j->{$_}{c}, $f . "/");
-			delete $j->{$_} unless %{$j->{$_}{c}};
-		} elsif ($h->{$_}{ow}) {
-			print "\e[36m", "ignored overwritten file $f.\n", "\e[m";
-		} else {
-			if (unlink $f)	{ delete $j->{$_} }
-			else		{ print "unable to unlink $f: $!.\n" }
-		}
-	}
-	unless (%$j) {
-		if (rmdir $d)	{ print "successfully rmdir $d.\n" }
-		else		{ print "unable to rmdir $d.\n" }
-	}
-}
-sub set {
-	my ($f, $mode, $uid, $gid, $mt) = @_;
-	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
-	chown $uid, $gid, $f and chmod $mode & 07777, $f and utimensat($f, $mt) or die "$f: $!";
-}
-sub rf {
-	my $f = shift;
-	open my $fh, "<", $f or die "open $f for reading: $!";
-	return join "", <$fh>;
-}
-sub wf {
-	my ($f, $c) = @_;
-	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
-	open my $fh, ">", $f or die "open $f for writing: $!";
-	if ($c) {
-		if (ref $c eq "REF") {
-			my $p = $$c;
-			cxs::write(fileno($fh), $p->{strref}, $p->{offset}, $p->{length}) or die "write";
-		} else {
-			print $fh $c;
-		}
-		close $fh or die "close $f: $!";
-	} else {
-		return $fh;
-	}
+	$v;
 }
 sub patch {
-	my ($root, $h, $j, $d) = @_;
-	$d = "" unless $d;
-	for (sort keys %$h) {
-		my ($r, $f) = ($d . $_, $root . $d . $_);
-		my $t = $filetype{$h->{$_}{mode} & 0170000};
-		if ($t eq "directory") {
-			my $ne = 0;
-			unless (-d $f) {
-				$ne = 1;
+	my ($cp, $vp) = @_;
+	my ($db, $v) = @$vp{qw/db v/};
+	for (sort keys %$v) {
+		my ($r, $f, $q) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, $v->{$_});
+		#my $t = $q->{mode} & S_IFMT;
+		my $t = $q->{sl} ? S_IFLNK : $q->{mode} & S_IFMT;
+		if ($t == S_IFDIR) {
+			if (not $db->{$_}) {
 				mkdir $f or die "mkdir $f: $!";
-				$j->{$_} = {%{$h->{$_}}}, $j->{$_}{c} = {};
+				$db->{$_} = {%$q,
+					     c => {}};
 			}
-			patch($root, $h->{$_}{c}, $j->{$_}{c}, $r . "/");
-			set($f, @{$h->{$_}}{qw/mode uid gid mt/}) if $ne;
-		} elsif ($h->{$_}{ow}) {
-			print "\e[36m", "ignored overwritten file $f.\n", "\e[m";
+			my $p = $db->{$_};
+			patch($cp, {v => $q->{c},
+				    db => $p->{c},
+				    d => $r . '/'});
+			set($f, @$p{qw/mode uid gid mtime/}) if not $p->{owner};
+			$p->{owner}{$cp->{oid}} = $cp->{ts};
 		} else {
-			# meta-data only.
-			$j->{$_} = {%{$h->{$_}}}, delete $j->{$_}{c};
-			if ($t eq "regular file") {
-				if ($h->{$_}{hl}) {
-					my $g = $root . $h->{$_}{hl};
+			my $p = $db->{$_} = {%$q,
+					     owner => $db->{$_}{owner}};
+			unlink $f or die "$f exists but unable to unlink." if -e $f;
+			if ($t == S_IFREG) {
+				if ($p->{hl}) {
+					my $g = $cp->{root} . $p->{hl};
 					link $g, $f or die "unable to hard link $f to $g: $!";
 				} else {
-					wf($f, $h->{$_}{c});
-					set($f, @{$h->{$_}}{qw/mode uid gid mt/});
+					wf($f, delete $p->{c});
+					set($f, @$p{qw/mode uid gid mtime/});
 				}
-			} elsif ($t eq "symbolic link") {
-				unlink $f or die "unable to remove $f for symbolic linking.\n" if -e $f;
-				symlink $h->{$_}{c}, $f or die "unable to symlink $f to $h->{$_}{c}.";
-				my ($uid, $gid, $mt) = @{$h->{$_}}{qw/uid gid mt/};
+			} else {
+				#unlink $f or die "unable to remove $f for symbolic linking.\n" if -e $f;
+				symlink $p->{sl}, $f or die "unable to symlink $f to $p->{sl}: $!.";
 				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
-				lchown($f, $uid, $gid) and utimensat($f, $mt) or die "$f: $!";
+				lchown($f, @$p{qw/uid gid/}) and utimensat($f, $p->{mtime}) or die "$f: $!";
 			}
+			$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 		}
 	}
 }
-sub display {
-	my ($h, $d) = @_;
-	for (sort keys %$h) {
-		my $f = $d . $_;
-		my $t = $filetype{$h->{$_}{mode} & 0170000};
-		if ($t eq "directory") {
-			print "$f/\n";
-			display($h->{$_}{c}, $f . "/");
+# merge two patch trees, the first one takes higher priority.
+sub merge {
+	my ($p, $q) = @_;
+	for (keys %$q) {
+		if (not $p->{$_}) {
+			$p->{$_} = $q->{$_};
 		} else {
-			print "\e[36m" if $h->{$_}{ow};
-			if ($t eq "symbolic link" or $h->{$_}{hl}) {
-				print "$f -> ", $h->{$_}{c}, "\n";
-			} elsif ($t eq "regular file") {
-				print "$f\n"
-			}
-			print "\e[m" if $h->{$_}{ow};
+			my ($t, $_t) = ($p->{$_}{mode} & S_IFMT, $q->{$_}{mode} & S_IFMT);
+			if ($t == S_IFDIR xor $_t == S_IFDIR)	{ ... }
+			elsif ($t == S_IFDIR)			{ merge($p->{$_}{c}, $q->{$_}{c}) }
 		}
 	}
 }
-sub ow0 {
-	my ($h, $d) = @_;
-	for (sort keys %$h) {
-		my $f = $d . $_;
-		my $t = $filetype{$h->{$_}{mode} & 0170000};
-		if ($t eq "directory") {
-			print "$f/\n";
-			ow0($h->{$_}{c}, $f . "/");
-		} elsif ($h->{$_}{ow}) {
-			delete $h->{$_}{ow};
-			print "ow flag of $f deleted.\n";
-		}
+# add path r from v to p.
+sub grow {
+	my ($p, $v, $r) = @_;
+	my @d = split m|/|, $r;
+	my $f = pop @d;
+	for (@d) {
+		$p->{$_} = {%{$v->{$_}},
+			    c => {}} if not $p->{$_};
+		$p = $p->{$_}{c}, $v = $v->{$_}{c};
 	}
+	$p->{$f} = $v->{$f};
 }
-sub rs_pson_normalize {
-	my $h = shift;
-	for (keys %$h) {
-		for my $k (keys %{$h->{$_}}) {
-			if ($k ne "c") {
-				my $p = ${$h->{$_}{$k}};
-				$h->{$_}{$k} = substr(${$p->{strref}}, $p->{offset}, $p->{length});
-			}
-		}
-		my $t = $filetype{$h->{$_}{mode} & 0170000};
-		if ($t eq "symbolic link" or $h->{$_}{hl}) {
-			my $p = ${$h->{$_}{c}};
-			$h->{$_}{c} = substr(${$p->{strref}}, $p->{offset}, $p->{length});
-		}
-		rs_pson_normalize($h->{$_}{c}) if $t eq "directory";
-	}
-}
-
-my %S;
-while (@ARGV) {
-	my $s = shift @ARGV;
-	if ($s eq "-") {
-		last;
-	} elsif ($s =~ /^-(.*)/) {
-		$s = $1;
-		my $p = shift @ARGV;
-		if ($p =~ /^-/)	{
-			unshift @ARGV, $p;
-			$S{$s} = 1;
-		} else {
-			$S{$s} = $p
-		}
-	} else {
-		unshift @ARGV, $s;
-		last
-	}
-}
-my $tree = $S{tree} // "$ENV{HOME}/.tree";
-my $op = shift @ARGV;
-if ($op =~ /compile/) {
-	# the source tarball or a directory.
-	my $f = shift @ARGV;
-	# package name.
-	my $pn = $S{package};
-	unless ($pn) {
-		$f =~ m|([^/]*)-| or die "source tarball filename unrecognized.";
-		$pn = $1;
-	}
-	die "no package name." unless $pn;
-	# the directory we want to enter after extracting the tarball.
-	my $d;
-	if (-d $f) {
-		$d = $f;
-	} else {
-		(xsh(1, qw/tar -xvf/, $f))[0] =~ m|([^/\n]*)| or die "tarball structure unable to handle.";
-		$d = $1;
-	}
-	# previous working directory.
-	my $pwd = readlink "/proc/self/cwd" or die "readlink: $!.";
-	chdir $d or die "chdir $d: $!";
-	unless ($B{$pn}{noc}) {
-		xsh(0, qw/autoreconf -iv/) or die "autoreconf failed." unless -x "configure";
-		my $prefix;
-		if ($op =~ /^pcompile/) {
-			$ENV{CFLAGS} = $ENV{CXXFLAGS} = $ENV{CPPFLAGS} = "-I/p/include";
-			unless ($op =~ /32$/)	{ $ENV{LDFLAGS} = "-L/p/lib -L/p/lib64 -Wl,-I/p/lib/ld-linux-x86-64.so.2" }
-			else			{ $ENV{LDFLAGS} = "-L/p/lib -Wl,-I/p/lib/ld-linux.so.2" }
-			$prefix = "--prefix=/p";
-		} else {
-			$prefix = "--prefix=/";
-		}
-		my $e = $B{$pn}{env};
-		if ($e) {
-			$ENV{$_} = $e->{$_} for (keys %$e);
-		}
-		xsh(0, "./configure", @{$B{$pn}{switch}}, $prefix,
-		    {to => *STDERR,
-		     from => *STDOUT,
-		     mode => ">"}, qw/| less -KR/) or die "configure failed.";
-	}
-	xsh(0, qw/bash -c/, $B{$pn}{postc}) or die "post configure failed." if $B{$pn}{postc};
-	xsh(0, "make", @{$B{$pn}{mkparam}}) or die "make failed." unless $B{$pn}{nomk};
-	xsh(0, qw/rd make install/, @{$B{$pn}{miparam}}) or die "make install failed.";
-	xsh(0, qw/rd bash -c/, $B{$pn}{postmi}) or die "post make install failed." if $B{$pn}{postmi};
-	chdir $pwd or die "chdir to previous working directory $pwd failed: $!.";
-	xsh(0, qw/rm -rf/, $d) or die "cannot remove source code directory." unless -d $f;
-} elsif ($op =~ /^(display|\+ow|delete|add|remove|patch|check)$/) {
-	my $f = shift @ARGV;
-	mmap($f, my $b);
-	my $h = (pson_parse({strref => \$b, flag => 1}, 0))[0];
-	rs_pson_normalize($h);
-	if ($op eq "display") {
-		display($h, "");
-	} elsif ($op eq "+ow") {
-		ow0($h, "");
-		pson_unparse_w($h, wf($f));
-	} elsif ($op eq "delete") {
-		# flag indicate the if we made any change.
-		my $c = 0;
-		for (@ARGV) {
-			my @d = split m|/|;
-			my ($i, $p) = (0, $h);
-			while ($i < @d - 1) {
-				$p = $p->{$d[$i]}{c};
-				last unless $p;
-				$i++;
-			}
-			if ($p and $p->{$d[$i]}) {
-				delete $p->{$d[$i]}, $c = 1;
-				print "successfully deleted $_.\n";
-			} else {
-				print "$_ not found.\n";
-			}
-		}
-		pson_unparse_w($h, wf($f)) if $c;
-	} elsif ($op eq "add") {
-		# how many prefix / are going to be removed.
-		my $p = 1;
-		for (@ARGV) {
-			$p = $1, next if /^-p(\d+)$/;
-			pos = 0;
-			my ($i, $c) = ($p, "");
-			$i--, $c .= $1 while $i and m|(.*?/)|gc;
-			print "prefix $c of $_ removed.\n";
-			my $g = $h;
-			while (m|(.*?)/|gc) {
-				$c .= $1 . "/";
-				unless ($g->{$1}) {
-					$g->{$1} = {c => {}};
-					@{$g->{$1}}{qw/mode uid gid mt/} = (lstat($c))[2, 4, 5, 9];
+sub rm {
+	my ($cp, $vp) = @_;
+	my $db = $vp->{db};
+	for (keys %$db) {
+		my ($r, $f, $p, $o) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, $db->{$_}, $db->{$_}{owner});
+		if ($p->{c}) {
+			if ($o->{$cp->{oid}}) {
+				rm($cp, {db => $p->{c},
+					 d => $r . '/'});
+				delete $o->{$cp->{oid}};
+				if (not %$o) {
+					rmdir $f or die "unable to rmdir $f: $!.";
+					delete $db->{$_};
 				}
-				$g = $g->{$1}{c};
-			}
-			/(.*)/g;
-			if ($1) {
-				print "adding file ", $c . $1, ".\n";
-				$g->{$1} = {};
-				@{$g->{$1}}{qw/mode uid gid mt/} = (lstat($c . $1))[2, 4, 5, 9];
-				my $t = $filetype{$g->{$1}{mode} & 0170000};
-				if ($t eq "regular file") {
-					my $h = {
-						type => "mmap",
-						f => $c . $1
-					};
-					$g->{$1}{c} = \$h;
-				} elsif ($t eq "symbolic link") {
-					$g->{$1}{c} = readlink $c . $1 or die $!;
-				} else {
-					die "filetype of ", $c . $1, " unrecognized.\n";
-				}
-			} else {
-				print "adding directory $c.\n";
-				my $d = walk({root => $c, exclude => [], ih => {}});
-				%$g = %{diff({}, $d, $c)};
-			}
-		}
-		pson_unparse_w($h, wf($f));
-	} else {
-		# remove or patch now.
-		my $root = shift @ARGV;
-		die "root directory not specified." unless $root;
-		if ($op eq "remove") {
-			my $j = pson_parse_wrap(rf($tree));
-			remove($h, $j, $root);
-			pson_unparse_w($j, wf($tree . "-candidate"));
-		} elsif ($op eq "check") {
-			my $d = check({root => $root, ih => {}}, $h);
-			if (%$d) {
-				display($d, $root)
-			} else {
-				print "\e[32mperfect\e[m.\n"
 			}
 		} else {
-			my $g = {};
-			for (@ARGV) {
-				my @d = split m|/|;
-				my ($i, $p, $q) = (0, $h, $g);
-				while ($i < @d - 1) {
-					$p = $p->{$d[$i]};
-					die "$_ doesn't exist in $f." unless $p;
-					unless ($q->{$d[$i]}) {
-						$q = $q->{$d[$i]} = {c => {}};
-						for (keys %$p) {
-							$q->{$_} = $p->{$_} if $_ ne "c";
+			if ($o->{record}{$cp->{oid}}) {
+				delete $o->{record}{$cp->{oid}};
+				if ($o->{current} eq $cp->{oid}) {
+					unlink $f or warn "unable to unlink $f: $!.";
+					if (%{$o->{record}}) {
+						my $oid;
+						for (keys %{$o->{record}}) {
+							$oid = $_ if not $oid or $o->{record}{$_} > $o->{record}{$oid};
 						}
+						my $p = $cp->{patch};
+						if (not $p->{$oid}) {
+							my $v = rs_parse($cp->{pool} . $oid . '.rs');
+							$p->{$oid} = {v => $v,
+								      p => {}};
+						}
+						grow(@{$p->{$oid}}{qw/p v/}, $r);
 					} else {
-						$q = $q->{$d[$i]};
+						delete $db->{$_};
 					}
-					$p = $p->{c}, $q = $q->{c};
-					$i++;
 				}
-				$q->{$d[$i]} = $p->{$d[$i]} or die "$_ doesn't exist in $f.";
 			}
-			my $j;
-			if ($S{"no-tree"})	{ $j = {} }
-			else			{ $j = pson_parse_wrap(rf($tree)) }
-			patch($root, %$g ? $g : $h, $j);
-			pson_unparse_w($j, wf($tree . "-candidate")) unless $S{"no-tree"};
-		}
-	}
-} elsif ($op eq "p2j") {
-	print json_unparse_readable(pson_parse_wrap(rf(shift)));
-} else {
-	my ($root, $df) = @ARGV;
-	die "root directory not specified." unless $root;
-	my $p = {
-		root => $root,
-		ih => {},
-		exclude => [
-			qw/lost+found home var root boot proc sys run dev tmp p usr private texlive/,
-			#   these two info directory files are updated when installing info files, they don't
-			# really belong to any particular package.
-			"info/dir", "share/info/dir",
-			#   system-wide configuration files that we mannually edited, we don't want any package
-			# to claim anyone of them as its contents, or if we remove such a package in order to
-			# update, they will be deleted.
-			map("etc/" . $_,
-			    qw|
-				passwd group shadow hosts init0 init1 inittab keymaps.rc lynx.cfg
-				lynx.lss mtab nsswitch.conf protocols resolv.conf udev/rules.d
-				X11/xorg.conf wgetrc login.defs fstab ld.so.cache sshd.pid ld.so.conf
-				services smb.conf sshd_config hosts.allow hosts.deny exports adjtime
-				modprobe.d xml netns
-
-				passwd- group- shadow-
-			    |,
-			),
-			#   temporary symbolic links, should be commented out when the package they belong to is
-			# installed.
-			#"lib/ld-linux.so.2",
-			#"bin/sh", "bin/bash",
-			#"bin/pwd",
-			#"bin/perl",
-			#   interpreter for x86-64 is expected in /lib64, but glibc doesn't automatically create
-			# the symbolic link for us.
-			"lib64/ld-linux-x86-64.so.2",
-			# INPUT(-lncursesw)
-			"lib/libncurses.so",
-			# symbolic link to include/ncursesw
-			"include/ncurses",
-			#   mannually edited, since ncurses is installed before pkgconfig, we can avoid supplying
-			# additional flags to quite a few packages after.
-			map("lib/pkgconfig/" . $_, qw/ncurses.pc ncursesw.pc/),
-			# ssl related.
-			map("ssl/" . $_, qw/certs cert.pem/),
-			# kernel modules.
-			"lib/modules",
-			# windows fonts.
-			"share/fonts/X11/windows",
-			# dejavu fonts.
-			"share/fonts/X11/dejavu",
-			# downloaded from http://www.linux-usb.org/usb-ids.html.
-			"share/usb.ids"
-		    ]
-	};
-	if ($op eq "create") {
-		my $h = walk($p);
-		pson_unparse_w($h, wf($tree));
-	} else {
-		die "diff file not specified." unless $df;
-		if ($op eq "diff") {
-			my $q = walk($p);
-			pson_unparse_w($q, wf($tree . "-candidate"));
-			my $p = pson_parse_wrap(rf($tree));
-			pson_unparse_w(diff($p, $q, $root), wf($df));
 		}
 	}
 }
-print rf("/proc/self/status") if $S{verbose};
+sub wf {
+	my $f = shift;
+	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
+	open my $fh, '>', $f or die "open $f for writing: $!";
+	if (@_)	{ syswrite $fh, shift }
+	else	{ $fh }
+}
+sub priv {
+	my $f = shift;
+	my ($uid, $gid) = (getpwnam $ENV{USER})[2, 3];
+	if (not $f) {
+		($(, $)) = ($gid, "$gid $gid");
+		setresuid($uid, $uid, 0);
+	} else {
+		setresuid(0, 0, 0);
+		($(, $)) = (0, '0 0');
+	}
+}
+sub tag {
+	my ($cp, $vp) = @_;
+	my ($v, $oid, $db, $d) = ({}, $cp->{oid}, @$vp{qw/db d/});
+	say {$cp->{sink}} $d;
+	for (keys %$db) {
+		my ($p, $r) = ($db->{$_}, $d . $_);
+		if ($p->{c}) {
+			$v->{$_} = {%$p,
+				    c => tag($cp, {db => $p->{c},
+						   d => $r . '/'})} if $p->{owner}{$oid};
+		} else {
+			$v->{$_} = $p, say {$cp->{sink}} $r if $p->{owner}{record}{$oid};
+		}
+	}
+	$v;
+}
+sub confirm () {
+	chomp(my $a = <STDIN>);
+	exit unless $a;
+}
+sub main {
+	my $s;
+	do {
+		my $c = arg_parse();
+		$s = $c->{profile} ? do $c->{profile} : do "$ENV{HOME}/.rs.profile" || {};
+		add($s, %$c);
+	};
+	print 'run-time config: ', json_unparse_readable($s);
+	# mod tells us whether the database is modified.
+	my ($db, $mod) = rs_parse($s->{db});
+	while (@ARGV) {
+		my $op = shift @ARGV;
+		if ($op eq 'diff') {
+			my $oid = shift @ARGV;
+			my ($p, $_v) = $s->{pool} . $oid . '.rs';
+			if (-e $p) {
+				say "$p exists, will merge with new generated patch tree.";
+				$_v = rs_parse($p);
+			}
+			my $v = diff({ih => {},
+				      root => $s->{root},
+				      oid => $oid,
+				      ts => time}, {db => $db,
+						    ign => $s->{ign} ? do $s->{ign} : undef,
+						    d => ''});
+			$mod = 1;
+			merge($v, $_v) if $_v;
+			rs_unparse($v, fileno wf($p));
+		} elsif ($op eq 'patch') {
+			my $f = shift @ARGV;
+			#   v is the parsed value of the patch, and can be cut using subtree switch,
+			# the final patch to apply is stored in p.
+			my $v = my $p = rs_parse($f);
+			if (exists $s->{subtree}) {
+				$p = {};
+				grow($p, $v, $_) for flatten($s->{subtree});
+			}
+			my ($oid) = $f =~ m|([^/]*).rs$|;
+			patch({root => $s->{root},
+			       oid => $oid,
+			       ts => time}, {v => $p,
+					     db => $db,
+					     d => ''});
+			$mod = 1;
+		} elsif ($op eq 'remove') {
+			my $oid = shift @ARGV;
+			rm({root => $s->{root},
+			    oid => $oid,
+			    pool => $s->{pool},
+			    patch => my $p = {}}, {db => $db,
+						   d => ''});
+			$mod = 1;
+			my $ts = time;
+			for (keys %$p) {
+				patch({root => $s->{root},
+				       oid => $_,
+				       ts => $ts}, {v => $p->{$_}{p},
+						    db => $db,
+						    d => ''});
+			}
+		} elsif ($op eq 'compile') {
+			# drop root privilege before compile, as suggested by many packages.
+			priv(0);
+			my ($p, $oid, $pkg, $d, $git) = shift @ARGV;
+			if ($git = -d $p) {
+				mkdir $d = $oid = shift @ARGV or die $!;
+				xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
+				    $p, $d);
+			} else {
+				($oid) = $p =~ m|([^/]*).tar.*$|;
+				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
+			}
+			($pkg) = $s->{package} || $oid =~ m|(.*)-|;
+			my $_d = readlink '/proc/self/cwd' or die "readlink: $!.";
+			chdir $d or die "chdir $d: $!.";
+			my $b = (do $s->{build})->($s)->{$pkg};
+			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
+			unless ($b->{'no-configure'}) {
+				local %ENV = %ENV;
+				xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
+				my @p;
+				if ($s->{bootstrap}) {
+					$ENV{CPPFLAGS} = '-I/p/include' unless $b->{'no-cppflags'};
+					$ENV{LDFLAGS} = '-L/p/lib -Wl,-I' . ($s->{i386} ?
+									     '/p/lib/ld-linux.so.2' : $s->{arm} ?
+									     '/p/lib/ld-linux-armhf.so.3' :
+									     '/p/lib/ld-linux-x86-64.so.2');
+					push @p, '--prefix=/p';
+				} else {
+					push @p, '--prefix=/usr';
+				}
+				my $e = $b->{environment};
+				$ENV{$_} = $e->{$_} for keys %$e;
+				xsh(0, './configure', @{$b->{switch}}, @p,
+				    {to => *STDERR,
+				     from => *STDOUT,
+				     mode => '>'}, qw/| less -KR/) or die 'configure failed.';
+			}
+			xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
+			xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
+			xsh({'feed-stdin' => 1}, $b->{'post-make'}, 'bash') or die 'post-make failed.' if $b->{'post-make'};
+			priv(1);
+			xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.';
+			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
+			my $cwd = readlink '/proc/self/cwd' or die $!;
+			# do some cleaning.
+			unless ($s->{'no-rm'}) {
+				say "will 'rm -rf ../$d' on $cwd.";
+				confirm;
+				xsh(0, qw/rm -rf/, "../$d");
+			}
+			# return to where we started.
+			chdir $_d or die "chdir $_d: $!.";
+			# the next steps.
+			push @ARGV, 'diff', $oid, 'tag', $oid;
+		} elsif ($op eq 'tag') {
+			my ($oid, $pid) = shift @ARGV;
+			local $SIG{PIPE} = 'IGNORE';
+			do {
+				pipe my $r, my $w or die $!;
+				$pid = xsh({asynchronous => 1},
+					   qw/less -R/, {to => *STDIN,
+							 from => $r,
+							 mode => '<'});
+				close $r;
+				print $w json_unparse_readable(tag({oid => $oid,
+								    sink => $w}, {db => $db,
+										  d => ''}));
+			};
+			# we must wait here or we will lose control-terminal.
+			waitpid $pid, 0;
+		}
+	}
+	rs_unparse($db, fileno wf($s->{db})) if $mod;
+}
