@@ -1,0 +1,3 @@
+TYPEMAP
+uid_t	T_IV
+gid_t	T_IV

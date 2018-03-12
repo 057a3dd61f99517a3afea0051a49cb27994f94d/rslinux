@@ -18,10 +18,11 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use c 'sane', iautoload => ['ExtUtils::MakeMaker', 'Devel::PPPort'];
-WriteFile();
-my $h = $ENV{HOME};
-WriteMakefile(
-	NAME => 'rs',
-	INC => "-I$h/mp",
-    );
+require Devel::PPPort;
+Devel::PPPort::WriteFile();
+use ExtUtils::MakeMaker;
+WriteMakefile(NAME => 'App::rs',
+	      ABSTRACT => 'package manager of RSLinux',
+	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
+	      EXE_FILES => ['bin/rs'],
+	      LICENSE => 'gpl_3');

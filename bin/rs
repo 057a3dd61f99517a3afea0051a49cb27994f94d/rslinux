@@ -19,7 +19,7 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use c iautoload => [qw/c cxs rs dot/], 'constant', 'sane';
+use App::rs iautoload => ['App::rs'], 'constant', 'sane';
 
 main();
 
@@ -34,15 +34,12 @@ sub equiv {
 	not grep { $p->{$_} ne $q->{$_} } qw/mode uid gid size mtime hl sl/;
 }
 sub elf {
-	my ($f, $v) = shift;
-	mmap($f, my $b);
-	$v = 1 if length $b >= 4 and substr($b, 0, 4) eq "\x7fELF";
-	munmap($b, length $b);
-	$v;
+	open my $fh, '<', shift or die $!;
+	read($fh, my $b, 4) == 4 and $b eq "\x7fELF";
 }
 sub strip {
 	my ($f, $m, $root) = @_;
-	my $s = {};
+	my $s;
 	if (/\.[ao]$/)						{ @$s{qw/strip archive/} = (1, 1) }
 	elsif ((/\.so/ or $m->{mode} & 0111) and elf($f))	{ $s->{strip} = 1 }
 	if ($s->{strip}) {
@@ -111,7 +108,7 @@ sub patch {
 	my ($db, $v) = @$vp{qw/db v/};
 	for (sort keys %$v) {
 		my ($r, $f, $q) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, $v->{$_});
-		#my $t = $q->{mode} & S_IFMT;
+		# That's for historical reasons...
 		my $t = $q->{sl} ? S_IFLNK : $q->{mode} & S_IFMT;
 		if ($t == S_IFDIR) {
 			if (not $db->{$_}) {
@@ -138,7 +135,6 @@ sub patch {
 					set($f, @$p{qw/mode uid gid mtime/});
 				}
 			} else {
-				#unlink $f or die "unable to remove $f for symbolic linking.\n" if -e $f;
 				symlink $p->{sl}, $f or die "unable to symlink $f to $p->{sl}: $!.";
 				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
 				lchown($f, @$p{qw/uid gid/}) and utimensat($f, $p->{mtime}) or die "$f: $!";
@@ -254,8 +250,9 @@ sub main {
 	my $s;
 	do {
 		my $c = arg_parse();
-		$s = $c->{profile} ? do $c->{profile} : do "$ENV{HOME}/.rs.profile" || {};
-		add($s, %$c);
+		my $f = $c->{profile} || "$ENV{HOME}/.rs.profile";
+		$s = do $f;
+		@$s{keys %$c} = values %$c;
 	};
 	print 'run-time config: ', json_unparse_readable($s);
 	# mod tells us whether the database is modified.

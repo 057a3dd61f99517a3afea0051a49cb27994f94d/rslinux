@@ -29,7 +29,23 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <string.h>
-#include "c.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#define STR(a)	#a
+#define STR1(a)	STR(a)
+#define WRAP(a)					\
+	do {					\
+		a;				\
+	} while (0)
+#define croak_if(cond, s)						\
+	WRAP(if (cond) {						\
+		perror("File " __FILE__ ", line " STR1(__LINE__) ", " s); \
+		exit(~0);						\
+	})
+#define errn1(a)	croak_if((a) == -1, "("#a") == -1")
+#define unless(a)	if (!(a))
+#include <stdint.h>
 
 #define CALL	s[sp].st = NEW, sp += 1
 #define RET(a)	v = a, sp -= 1
@@ -78,7 +94,7 @@ void cwrite(int fd, const char *in, size_t il)
 	}
 }
 
-MODULE = rs		PACKAGE = rs
+MODULE = App::rs		PACKAGE = App::rs
 
 SV*
 rs_parse(char *f)
@@ -93,7 +109,7 @@ rs_parse(char *f)
 			HV		*v;
 		}s[256], *q;
 		SV	*v;
-		uc	sp = 0;
+		uint8_t	sp = 0;
 		CALL;
 		while (sp) {
 			q = s + sp - 1;
@@ -144,7 +160,7 @@ rs_unparse(SV *v, int fd)
 			}st;
 			HV	*v;
 		}s[256], *q;
-		uc	sp = 0;
+		uint8_t	sp = 0;
 		LLAC(v);
 		while (sp) {
 			q = s + sp - 1;
@@ -190,3 +206,23 @@ rs_unparse(SV *v, int fd)
 			}
 		}
 		cwrite(fd, NULL, 0);
+
+bool
+lchown(char *f, uid_t uid, gid_t gid)
+	POSTCALL:
+		RETVAL = !RETVAL;
+
+bool
+utimensat(char *f, int t)
+	CODE:
+		struct timespec	times[2];
+		times[0].tv_nsec = UTIME_OMIT;
+		times[1].tv_sec = t, times[1].tv_nsec = 0;
+		RETVAL = !utimensat(AT_FDCWD, f, times, AT_SYMLINK_NOFOLLOW);
+	OUTPUT:
+		RETVAL
+
+bool
+setresuid(uid_t uid, uid_t euid, uid_t suid)
+	POSTCALL:
+		RETVAL = !RETVAL;
