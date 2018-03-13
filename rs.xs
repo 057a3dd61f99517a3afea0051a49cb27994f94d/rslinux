@@ -45,7 +45,6 @@
 	})
 #define errn1(a)	croak_if((a) == -1, "("#a") == -1")
 #define unless(a)	if (!(a))
-#include <stdint.h>
 
 #define CALL	s[sp].st = NEW, sp += 1
 #define RET(a)	v = a, sp -= 1

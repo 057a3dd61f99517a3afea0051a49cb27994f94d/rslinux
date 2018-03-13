@@ -27,13 +27,12 @@ use XSLoader;
 XSLoader::load();
 
 BEGIN {
-	# TODO: use XS to generate this table.
 	my $c = {S_IFMT => 0170000,
 		 S_IFLNK => 0120000,
 		 S_IFREG => 0100000,
 		 S_IFDIR => 0040000};
 	my @H = ($^H, ${^WARNING_BITS}, %^H);
-	*import = sub {
+	sub import {
 		no strict 'refs';
 		my $ns = caller . '::';
 		shift;
@@ -95,24 +94,21 @@ BEGIN {
 		};
 	}
 }
-do {
-	my @a = qw/Cpanel::JSON::XS JSON::XS JSON::PP/;
-	import(':D',
-	       iautoload => ['Carp'],
-	       oautoload => [@a]);
-	sub json_unparse_readable {
-		state $o = do {
-			my $o;
-			for (@a) {
-				last if eval {
-					$o = $_->new->pretty->canonical;
-				};
-			}
-			$o;
-		};
-		$o ? $o->encode(shift) : "what?!\n";
-	}
-};
+{my @a = qw/Cpanel::JSON::XS JSON::XS JSON::PP/;
+ App::rs->import(iautoload => ['Carp'],
+		 oautoload => [@a]);
+ sub json_unparse_readable {
+	 state $o = do {
+		 my $o;
+		 for (@a) {
+			 last if eval {
+				 $o = $_->new->pretty->canonical;
+			 };
+		 }
+		 $o;
+	 };
+	 $o ? $o->encode(shift) : "what?!\n";
+ }}
 sub xsh {
 	my $f = shift;
 	if (not ref $f) {
