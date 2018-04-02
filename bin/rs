@@ -19,7 +19,7 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use App::rs iautoload => ['App::rs'], 'constant', 'sane';
+use App::rs iautoload => [qw/App::rs Term::ANSIColor Cwd/], 'constant', 'sane';
 
 main();
 
@@ -35,7 +35,8 @@ sub equiv {
 }
 sub elf {
 	open my $fh, '<', shift or die $!;
-	read($fh, my $b, 4) == 4 and $b eq "\x7fELF";
+	my $b;
+	read($fh, $b, 4) == 4 and $b eq "\x7fELF";
 }
 sub strip {
 	my ($f, $m, $root) = @_;
@@ -215,10 +216,10 @@ sub wf {
 	if (@_)	{ syswrite $fh, shift }
 	else	{ $fh }
 }
-sub priv {
-	my $f = shift;
-	my ($uid, $gid) = (getpwnam $ENV{USER})[2, 3];
-	if (not $f) {
+sub runas {
+	my $u = shift;
+	if ($u ne 'root') {
+		my ($uid, $gid) = (getpwnam $u)[2, 3];
 		($(, $)) = ($gid, "$gid $gid");
 		setresuid($uid, $uid, 0);
 	} else {
@@ -242,9 +243,16 @@ sub tag {
 	}
 	$v;
 }
-sub confirm () {
-	chomp(my $a = <STDIN>);
-	exit unless $a;
+sub confirm ($) {
+	state $s = colored(['bright_green'], 'yes') . ' or ' .
+	    colored(['bright_red'], 'no') . ': ';
+	print shift, ', ', $s;
+	while (1) {
+		chomp(my $a = <STDIN>);
+		return 1 if $a eq 'yes';
+		return 0 if $a eq 'no';
+		print "Please answer $s";
+	}
 }
 sub main {
 	my $s;
@@ -256,7 +264,7 @@ sub main {
 	};
 	print 'run-time config: ', json_unparse_readable($s);
 	# mod tells us whether the database is modified.
-	my ($db, $mod) = rs_parse($s->{db});
+	my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
 	while (@ARGV) {
 		my $op = shift @ARGV;
 		if ($op eq 'diff') {
@@ -308,19 +316,34 @@ sub main {
 						    d => ''});
 			}
 		} elsif ($op eq 'compile') {
-			# drop root privilege before compile, as suggested by many packages.
-			priv(0);
-			my ($p, $oid, $pkg, $d, $git) = shift @ARGV;
-			if ($git = -d $p) {
-				mkdir $d = $oid = shift @ARGV or die $!;
-				xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
-				    $p, $d);
+			my $root;
+			if ($root = not $>) {
+				# drop root privilege before compile, as suggested by many packages.
+				my $u = $s->{'compile-as'} || $ENV{USER};
+				if ($u eq 'root') {
+					say color('bold red'), 'You are compiling as root!', color('reset');
+					$root = 0;
+				} else {
+					runas($u);
+				}
+			}
+			my $o = getcwd();
+			chdir($s->{'compile-in'} || '.') or die $!;
+			my ($p, $oid, $pkg, $d) = abs_path(shift @ARGV);
+			if (-d $p) {
+				$oid = shift @ARGV;
+				if ($s->{prepared}) {
+					$d = $p;
+				} else {
+					mkdir $d = $oid or die $!;
+					xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
+					    $p, $d);
+				}
 			} else {
-				($oid) = $p =~ m|([^/]*).tar.*$|;
+				($oid) = $p =~ m|([^/]*).tar.\w+$|;
 				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
 			}
 			($pkg) = $s->{package} || $oid =~ m|(.*)-|;
-			my $_d = readlink '/proc/self/cwd' or die "readlink: $!.";
 			chdir $d or die "chdir $d: $!.";
 			my $b = (do $s->{build})->($s)->{$pkg};
 			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
@@ -329,37 +352,34 @@ sub main {
 				xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
 				my @p;
 				if ($s->{bootstrap}) {
-					$ENV{CPPFLAGS} = '-I/p/include' unless $b->{'no-cppflags'};
-					$ENV{LDFLAGS} = '-L/p/lib -Wl,-I' . ($s->{i386} ?
-									     '/p/lib/ld-linux.so.2' : $s->{arm} ?
-									     '/p/lib/ld-linux-armhf.so.3' :
-									     '/p/lib/ld-linux-x86-64.so.2');
-					push @p, '--prefix=/p';
-				} else {
-					push @p, '--prefix=/usr';
+					$ENV{CPPFLAGS} = "-I$s->{prefix}/include" unless $b->{'no-cppflags'};
+					$ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . ($s->{i386} ?
+									     "$s->{prefix}/lib/ld-linux.so.2" : $s->{arm} ?
+									     "$s->{prefix}/lib/ld-linux-armhf.so.3" :
+									     "$s->{prefix}/lib/ld-linux-x86-64.so.2");
 				}
+				push @p, "--prefix=$s->{prefix}";
 				my $e = $b->{environment};
 				$ENV{$_} = $e->{$_} for keys %$e;
 				xsh(0, './configure', @{$b->{switch}}, @p,
 				    {to => *STDERR,
 				     from => *STDOUT,
-				     mode => '>'}, qw/| less -KR/) or die 'configure failed.';
+				     mode => '>'}, qw/| less --quit-on-intr --RAW-CONTROL-CHARS/) or die 'configure failed.';
 			}
 			xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
 			xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
 			xsh({'feed-stdin' => 1}, $b->{'post-make'}, 'bash') or die 'post-make failed.' if $b->{'post-make'};
-			priv(1);
+			# since the following is installation process we need to switch back to root.
+			runas('root') if $root;
 			xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.';
 			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
-			my $cwd = readlink '/proc/self/cwd' or die $!;
 			# do some cleaning.
-			unless ($s->{'no-rm'}) {
-				say "will 'rm -rf ../$d' on $cwd.";
-				confirm;
-				xsh(0, qw/rm -rf/, "../$d");
+			unless ($s->{prepared} or $s->{'no-rm'}) {
+				my $cwd = getcwd();
+				xsh(0, qw/rm -rf/, "../$d") if confirm "'rm -rf ../$d' on $cwd";
 			}
 			# return to where we started.
-			chdir $_d or die "chdir $_d: $!.";
+			chdir $o or die "chdir $o: $!.";
 			# the next steps.
 			push @ARGV, 'diff', $oid, 'tag', $oid;
 		} elsif ($op eq 'tag') {
