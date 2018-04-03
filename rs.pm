@@ -202,4 +202,11 @@ sub flatten {
 	my $v = shift;
 	ref $v eq 'ARRAY' ? @$v : $v;
 }
+sub linker {
+	my $s = shift;
+	$s->{i386} ?
+	    "$s->{prefix}/lib/ld-linux.so.2" : $s->{arm} ?
+	    "$s->{prefix}/lib/ld-linux-armhf.so.3" :
+	    "$s->{prefix}/lib/ld-linux-x86-64.so.2";
+}
 1;
