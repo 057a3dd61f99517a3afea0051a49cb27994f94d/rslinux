@@ -345,7 +345,12 @@ sub main {
 			}
 			($pkg) = $s->{package} || $oid =~ m|(.*)-|;
 			chdir $d or die "chdir $d: $!.";
-			my $b = (do $s->{build})->($s)->{$pkg};
+			my $b = do {
+				my ($b, $v) = (do $s->{build}, $pkg);
+				$b = $b->($s);
+				$v = $b->{$v} until ref $v or not defined $v;
+				$v;
+			};
 			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
 			unless ($b->{'no-configure'}) {
 				local %ENV = %ENV;
