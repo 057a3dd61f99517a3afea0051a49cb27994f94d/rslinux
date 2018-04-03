@@ -353,10 +353,7 @@ sub main {
 				my @p;
 				if ($s->{bootstrap}) {
 					$ENV{CPPFLAGS} = "-I$s->{prefix}/include" unless $b->{'no-cppflags'};
-					$ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . ($s->{i386} ?
-									     "$s->{prefix}/lib/ld-linux.so.2" : $s->{arm} ?
-									     "$s->{prefix}/lib/ld-linux-armhf.so.3" :
-									     "$s->{prefix}/lib/ld-linux-x86-64.so.2");
+					$ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . linker($s);
 				}
 				push @p, "--prefix=$s->{prefix}";
 				my $e = $b->{environment};
