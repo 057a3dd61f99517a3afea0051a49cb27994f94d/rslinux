@@ -214,4 +214,11 @@ sub linker {
 	    "$s->{prefix}/lib/ld-linux-armhf.so.3" :
 	    "$s->{prefix}/lib/ld-linux-x86-64.so.2";
 }
+sub add {
+	my $h = shift;
+	while (@_) {
+		my ($k, $v) = splice @_, 0, 2;
+		$h->{$k} = $v;
+	}
+}
 1;
