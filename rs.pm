@@ -27,43 +27,49 @@ use XSLoader;
 XSLoader::load();
 
 BEGIN {
+	no strict 'refs';
 	my $c = {S_IFMT => 0170000,
 		 S_IFLNK => 0120000,
 		 S_IFREG => 0100000,
 		 S_IFDIR => 0040000};
 	my @H = ($^H, ${^WARNING_BITS}, %^H);
 	sub import {
-		no strict 'refs';
 		my $ns = caller . '::';
 		shift;
 		while (@_) {
 			my $q = shift;
 			if ($q eq 'iautoload') {
-				my (@pkg, %map);
+				my (@pkg, %map, @l);
 				for (@{+shift}) {
-					my ($p, @f) = ref $_ ? @$_ : $_;
+					my ($p, @f) = ref ? @$_ : $_;
 					push @pkg, $p;
-					$map{$_} = $p for @f;
+					for (@f) {
+						push @l, $ns . $_ if s/^0//;
+						$map{$_} = $p;
+					}
 				}
+				my $i = 1;
 				*{$ns . 'AUTOLOAD'} = sub {
 					# "fully qualified name of the original subroutine".
 					my $q = our $AUTOLOAD;
 					# to avoid possibly overwrite @_ by successful regular expression match.
 					my ($f) = do { $q =~ /.*::(.*)/ };
-					no strict 'refs';
 					for my $p ($map{$f} || @pkg) {
 						#   calculate the actual file to be loaded thus avoid eval and
 						# checking $@ mannually.
 						do { require $p =~ s|::|/|gr . '.pm' };
 						if (my $r = *{"${p}::$f"}{CODE}) {
+							no warnings 'prototype';
 							*$q = $r;
 							# TODO: understand why using goto will lost context.
 							#goto &$r;
-							return &$r;
+							return $i ? undef : &$r;
 						}
 					}
 					confess("unable to autoload $q.");
 				};
+				$_->() for @l;
+				$i = 0;
 			} elsif ($q eq 'oautoload') {
 				for my $p (@{+shift}) {
 					my $r = $p =~ s|::|/|gr . '.pm';
@@ -88,7 +94,6 @@ BEGIN {
 	};
 	for my $f (keys %$c) {
 		my $v = $c->{$f};
-		no strict 'refs';
 		*$f = sub () {
 			$v;
 		};
