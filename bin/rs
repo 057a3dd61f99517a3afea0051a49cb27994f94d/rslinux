@@ -19,19 +19,21 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-use App::rs iautoload => [qw/App::rs Term::ANSIColor Cwd/], 'constant', 'sane';
+use App::rs 'sane', 'constant',
+    iautoload => [qw/App::rs Term::ANSIColor Cwd/,
+		  ['List::Util', map { '0' . $_ } qw/reduce all/]];
 
 main();
 
 sub set {
-	my ($f, $mode, $uid, $gid, $mtime) = @_;
+	my ($f, $m) = @_;
 	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
-	chown $uid, $gid, $f and chmod $mode & 07777, $f and utimensat($f, $mtime) or die "$f: $!";
+	chown @$m{qw/uid gid/}, $f and chmod $m->{mode} & 07777, $f and utimensat($f, $m->{mtime}) or die "$f: $!";
 }
 sub equiv {
 	my ($p, $q) = @_;
 	no warnings 'uninitialized';
-	not grep { $p->{$_} ne $q->{$_} } qw/mode uid gid size mtime hl sl/;
+	all { $p->{$_} eq $q->{$_} } qw/mode uid gid size mtime hl sl/;
 }
 sub elf {
 	open my $fh, '<', shift or die $!;
@@ -47,7 +49,7 @@ sub strip {
 		xsh(0, 'strip', $s->{archive} ? '--strip-unneeded' : (), $f);
 		say "strip on $f, st: $?.";
 		if (not $?) {
-			set($f, @$m{qw/mode uid gid mtime/});
+			set($f, $m);
 			$m->{size} = (stat $f)[7];
 		}
 	}
@@ -60,7 +62,8 @@ sub diff {
 		my $ign = $vp->{ign}{$_};
 		# ignore leaf only.
 		next if /^\.{1,2}$/ or $ign and not ref $ign;
-		my ($r, $f, $m) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, {});
+		my ($r, $m) = ($vp->{d} . $_, {});
+		my $f = $cp->{root} . $r;
 		(my $i, @$m{qw/mode uid gid size mtime/}) = (lstat $f)[1, 2, 4, 5, 7, 9];
 		if ($cp->{ih}{$i})	{ $m->{hl} = $cp->{ih}{$i} }
 		else			{ $cp->{ih}{$i} = $r }
@@ -79,10 +82,7 @@ sub diff {
 		}
 		if (%$st) {
 			if ($t == S_IFDIR) {
-				my $p = $db->{$_} = {%$m,
-						     c => $db->{$_}{c},
-						     owner => $db->{$_}{owner}};
-				$p->{c} = {} if not $p->{c};
+				add(my $p = $db->{$_} ||= {c => {}}, %$m);
 				my $c = diff($cp, {db => $p->{c},
 						   ign => $vp->{ign}{$_},
 						   d => $r . '/'});
@@ -94,8 +94,7 @@ sub diff {
 			} else {
 				my $n = 1 if $t == S_IFREG and not $m->{hl};
 				strip($f, $m) if $n;
-				my $p = $db->{$_} = {%$m,
-						     owner => $db->{$_}{owner}};
+				add(my $p = $db->{$_} ||= {}, %$m);
 				$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 				$v->{$_} = {%$m};
 				$v->{$_}{c} = \$f if $n;
@@ -108,7 +107,8 @@ sub patch {
 	my ($cp, $vp) = @_;
 	my ($db, $v) = @$vp{qw/db v/};
 	for (sort keys %$v) {
-		my ($r, $f, $q) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, $v->{$_});
+		my ($r, $q) = ($vp->{d} . $_, $v->{$_});
+		my $f = $cp->{root} . $r;
 		# That's for historical reasons...
 		my $t = $q->{sl} ? S_IFLNK : $q->{mode} & S_IFMT;
 		if ($t == S_IFDIR) {
@@ -121,25 +121,24 @@ sub patch {
 			patch($cp, {v => $q->{c},
 				    db => $p->{c},
 				    d => $r . '/'});
-			set($f, @$p{qw/mode uid gid mtime/}) if not $p->{owner};
+			set($f, $p) if not $p->{owner};
 			$p->{owner}{$cp->{oid}} = $cp->{ts};
 		} else {
-			my $p = $db->{$_} = {%$q,
-					     owner => $db->{$_}{owner}};
 			unlink $f or die "$f exists but unable to unlink." if -e $f;
 			if ($t == S_IFREG) {
-				if ($p->{hl}) {
-					my $g = $cp->{root} . $p->{hl};
+				if ($q->{hl}) {
+					my $g = $cp->{root} . $q->{hl};
 					link $g, $f or die "unable to hard link $f to $g: $!";
 				} else {
-					wf($f, delete $p->{c});
-					set($f, @$p{qw/mode uid gid mtime/});
+					wf($f, delete $q->{c});
+					set($f, $q);
 				}
 			} else {
-				symlink $p->{sl}, $f or die "unable to symlink $f to $p->{sl}: $!.";
+				symlink $q->{sl}, $f or die "unable to symlink $f to $q->{sl}: $!.";
 				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
-				lchown($f, @$p{qw/uid gid/}) and utimensat($f, $p->{mtime}) or die "$f: $!";
+				lchown($f, @$q{qw/uid gid/}) and utimensat($f, $q->{mtime}) or die "$f: $!";
 			}
+			add(my $p = $db->{$_} ||= {}, %$q);
 			$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 		}
 	}
@@ -173,7 +172,8 @@ sub rm {
 	my ($cp, $vp) = @_;
 	my $db = $vp->{db};
 	for (keys %$db) {
-		my ($r, $f, $p, $o) = ($vp->{d} . $_, $cp->{root} . $vp->{d} . $_, $db->{$_}, $db->{$_}{owner});
+		my ($r, $p, $o) = ($vp->{d} . $_, $db->{$_}, $db->{$_}{owner});
+		my $f = $cp->{root} . $r;
 		if ($p->{c}) {
 			if ($o->{$cp->{oid}}) {
 				rm($cp, {db => $p->{c},
@@ -185,22 +185,15 @@ sub rm {
 				}
 			}
 		} else {
-			if ($o->{record}{$cp->{oid}}) {
-				delete $o->{record}{$cp->{oid}};
+			my $d = $o->{record};
+			if (delete $d->{$cp->{oid}}) {
 				if ($o->{current} eq $cp->{oid}) {
 					unlink $f or warn "unable to unlink $f: $!.";
-					if (%{$o->{record}}) {
-						my $oid;
-						for (keys %{$o->{record}}) {
-							$oid = $_ if not $oid or $o->{record}{$_} > $o->{record}{$oid};
-						}
-						my $p = $cp->{patch};
-						if (not $p->{$oid}) {
-							my $v = rs_parse($cp->{pool} . $oid . '.rs');
-							$p->{$oid} = {v => $v,
-								      p => {}};
-						}
-						grow(@{$p->{$oid}}{qw/p v/}, $r);
+					if (%$d) {
+						my $oid = reduce { $d->{$b} > $d->{$a} ? $b : $a } keys %$d;
+						my $p = $cp->{patch}{$oid} ||= {v => rs_parse($cp->{pool} . $oid . '.rs'),
+										p => {}};
+						grow(@$p{qw/p v/}, $r);
 					} else {
 						delete $db->{$_};
 					}
@@ -258,9 +251,9 @@ sub main {
 	my $s;
 	do {
 		my $c = arg_parse();
-		my $f = $c->{profile} || "$ENV{HOME}/.rs.profile";
-		$s = do $f;
-		@$s{keys %$c} = values %$c;
+		$s = do($c->{profile} || "$ENV{HOME}/.rs.profile");
+		add($s, %$c);
+		$s->{prefix} ||= $s->{root};
 	};
 	print 'run-time config: ', json_unparse_readable($s);
 	# mod tells us whether the database is modified.
@@ -278,7 +271,7 @@ sub main {
 				      root => $s->{root},
 				      oid => $oid,
 				      ts => time}, {db => $db,
-						    ign => $s->{ign} ? do $s->{ign} : undef,
+						    ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
 						    d => ''});
 			$mod = 1;
 			merge($v, $_v) if $_v;
