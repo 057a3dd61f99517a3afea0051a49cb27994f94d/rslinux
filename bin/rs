@@ -220,18 +220,39 @@ sub runas {
 		($(, $)) = (0, '0 0');
 	}
 }
+sub crowded {
+	{subr => sub {
+		my $db = shift;
+		$db->{c} ? 1 : keys %{$db->{owner}{record}} > 1;
+	 },
+	 dir => 0,
+	 empty => 0};
+}
 sub tag {
+	my $oid = shift;
+	{subr => sub {
+		my $db = shift;
+		$db->{c} ? $db->{owner}{$oid} : $db->{owner}{record}{$oid};
+	 },
+	 dir => 1,
+	 empty => 1};
+}
+sub filter {
 	my ($cp, $vp) = @_;
-	my ($v, $oid, $db, $d) = ({}, $cp->{oid}, @$vp{qw/db d/});
-	say {$cp->{sink}} $d;
-	for (keys %$db) {
+	my ($v, $db, $d) = ({}, @$vp{qw/db d/});
+	say {$cp->{sink}} $d if $cp->{f}{dir};
+	for (sort keys %$db) {
 		my ($p, $r) = ($db->{$_}, $d . $_);
-		if ($p->{c}) {
-			$v->{$_} = {%$p,
-				    c => tag($cp, {db => $p->{c},
-						   d => $r . '/'})} if $p->{owner}{$oid};
-		} else {
-			$v->{$_} = $p, say {$cp->{sink}} $r if $p->{owner}{record}{$oid};
+		if ($cp->{f}{subr}($p)) {
+			say {$cp->{sink}} $r unless $p->{c};
+			if ($p->{c}) {
+				my $c = filter($cp, {db => $p->{c},
+						     d => $r . '/'});
+				$v->{$_} = {%$p,
+					    c => $c} if $cp->{f}{empty} or %$c;
+			} else {
+				$v->{$_} = $p;
+			}
 		}
 	}
 	$v;
@@ -377,8 +398,9 @@ sub main {
 			chdir $o or die "chdir $o: $!.";
 			# the next steps.
 			push @ARGV, 'diff', $oid, 'tag', $oid;
-		} elsif ($op eq 'tag') {
-			my ($oid, $pid) = shift @ARGV;
+		} elsif ($op =~ /^(tag|crowded)$/) {
+			my ($tab, $pid) = {tag => 1,
+					   crowded => 0};
 			local $SIG{PIPE} = 'IGNORE';
 			do {
 				pipe my $r, my $w or die $!;
@@ -387,9 +409,9 @@ sub main {
 							 from => $r,
 							 mode => '<'});
 				close $r;
-				print $w json_unparse_readable(tag({oid => $oid,
-								    sink => $w}, {db => $db,
-										  d => ''}));
+				print $w json_unparse_readable(filter({sink => $w,
+								       f => $::{$op}(splice @ARGV, 0, $tab->{$op})}, {db => $db,
+														      d => ''}));
 			};
 			# we must wait here or we will lose control-terminal.
 			waitpid $pid, 0;
