@@ -32,7 +32,7 @@ sub {
 	 ncursesw => {switch => ["--includedir=$s->{prefix}/include/ncursesw", qw|--with-shared --enable-widec --disable-db-install --without-manpages --without-progs --without-debug|]},
 	 bash => {switch => [qw/--with-curses/]},
 	 perl => {'no-configure' => 1,
-		      'post-configure' => $s->{bootstrap} ? "./Configure -de -D$l -Accflags=-I$s->{prefix}/include -Aldflags=\"-L$s->{prefix}/lib -Wl,-I" . linker($s) . '"' : "./Configure -de -D$l",
+		      'post-configure' => $s->{bootstrap} ? "./Configure -Dcc=gcc -de -D$l -Accflags=-I$s->{prefix}/include -Aldflags=\"-L$s->{prefix}/lib -Wl,-I" . linker($s) . '"' : "./Configure -de -D$l",
 		      'post-make' => $s->{bootstrap} ? undef : 'make test'},
 	 bzip2 => {'no-configure' => 1,
 		       'make-install-parameter' => [$r]},

@@ -94,7 +94,8 @@ sub diff {
 			} else {
 				my $n = 1 if $t == S_IFREG and not $m->{hl};
 				strip($f, $m) if $n;
-				add(my $p = $db->{$_} ||= {}, %$m);
+				my $p = $db->{$_} = {%$m,
+						     owner => $db->{$_}{owner}};
 				$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 				$v->{$_} = {%$m};
 				$v->{$_}{c} = \$f if $n;
@@ -134,11 +135,14 @@ sub patch {
 					set($f, $q);
 				}
 			} else {
-				symlink $q->{sl}, $f or die "unable to symlink $f to $q->{sl}: $!.";
+				# That's really nasty...
+				symlink my $g = $q->{sl}, $f or die "unable to symlink $f to $q->{sl}: $!.";
 				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
 				lchown($f, @$q{qw/uid gid/}) and utimensat($f, $q->{mtime}) or die "$f: $!";
 			}
-			add(my $p = $db->{$_} ||= {}, %$q);
+			# A new hash is required here and above since metadata varies for non-directory.
+			my $p = $db->{$_} = {%$q,
+					     owner => $db->{$_}{owner}};
 			$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 		}
 	}
@@ -258,8 +262,8 @@ sub filter {
 	$v;
 }
 sub confirm ($) {
-	state $s = colored(['bright_green'], 'yes') . ' or ' .
-	    colored(['bright_red'], 'no') . ': ';
+	state $s = colored('yes', 'bright_green') . ' or ' .
+	    colored('no', 'bright_red') . ': ';
 	print shift, ', ', $s;
 	while (1) {
 		chomp(my $a = <STDIN>);
@@ -268,13 +272,20 @@ sub confirm ($) {
 		print "Please answer $s";
 	}
 }
+sub rs_unparse_wrap {
+	my $o = shift;
+	print colored("Writing $o->{d}", 'bright_yellow'), ': ';
+	rs_unparse(@$o{qw/v fd/});
+	say colored('done', 'bright_green'), '.';
+}
 sub main {
 	my $s;
 	do {
 		my $c = arg_parse();
-		$s = do($c->{profile} || "$ENV{HOME}/.rs.profile");
+		$s = do($c->{profile} || "$ENV{HOME}/.rs.profile") || {};
 		add($s, %$c);
-		$s->{prefix} ||= $s->{root};
+		for ($s->{pool}, $s->{root})		{ s|(?<=[^/])$|/| if defined }
+		for ($s->{prefix} ||= $s->{root} )	{ s|/$|| if defined }
 	};
 	print 'run-time config: ', json_unparse_readable($s);
 	# mod tells us whether the database is modified.
@@ -294,9 +305,15 @@ sub main {
 				      ts => time}, {db => $db,
 						    ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
 						    d => ''});
-			$mod = 1;
-			merge($v, $_v) if $_v;
-			rs_unparse($v, fileno wf($p));
+			if ($s->{dry}) {
+				push @ARGV, 'tag', $oid;
+			} else {
+				$mod = 1;
+				merge($v, $_v) if $_v;
+				rs_unparse_wrap({v => $v,
+						 fd => fileno wf($p),
+						 d => "compiled package $p"});
+			}
 		} elsif ($op eq 'patch') {
 			my $f = shift @ARGV;
 			#   v is the parsed value of the patch, and can be cut using subtree switch,
@@ -341,9 +358,8 @@ sub main {
 					runas($u);
 				}
 			}
-			my $o = getcwd();
+			my ($p, $o, $oid, $pkg, $d) = (abs_path(shift @ARGV), getcwd());
 			chdir($s->{'compile-in'} || '.') or die $!;
-			my ($p, $oid, $pkg, $d) = abs_path(shift @ARGV);
 			if (-d $p) {
 				$oid = shift @ARGV;
 				if ($s->{prepared}) {
@@ -417,5 +433,353 @@ sub main {
 			waitpid $pid, 0;
 		}
 	}
-	rs_unparse($db, fileno wf($s->{db})) if $mod;
+	if ($mod)	{ rs_unparse_wrap({v => $db,
+					   fd => fileno wf($s->{db}),
+					   d => "database $s->{db}"}) }
+	else		{ say colored('Database not touched', 'green'), '.' }
 }
+
+=head1 NAME
+
+App::rs - The package manager for RSLinux
+
+=head1 SYNOPSIS
+
+    # compile, install, and generate package.
+    rs compile <tarball>
+    rs compile <git-directory> <oid>
+    rs --prepared compile <source-directory> <oid>
+
+    # generate package after manual installation.
+    rs diff <oid>
+
+    # install a previously compiled package.
+    rs patch <path/to/oid.rs>
+
+    # remove a package.
+    rs remove <oid>
+
+    # show the package tagged as oid.
+    rs tag <oid>
+
+=head1 DESCRIPTION
+
+RSLinux was born out of desire for freedom. Back in 2012, I was using
+ArchLinux, as with many distributions at that time, it's switching to
+systemd, and I would be forced to switch to it if I chose to update. It
+frustrated me deeply, as I always seek freedom, from a very young age, and I
+knew from my own experience that no matter how wonderful a thing is, it
+will become a demon that haunts me once I'm being forced to do it. I made
+up my mind to create something of my own so that I have complete freedom
+to choose how it would be.
+
+At first, I got my hand dirty with LFS, succeeded and got pretty satisfied
+with it. Later in 2013, I made it again without following the LFS book, I
+tried a different bootstrapping process with what I thought was right and
+necessary, and it fits my mind much better. I typically rebuild my system
+on an annual basis, after I did it in 2014 I gradually realized its problem,
+without a package manager, thus an easy way to remove installed package,
+I tended to dislike denpendency, and prefer a minimalist system, which
+prevented me to explore since I knew I would have no easy way to clean up the mess
+after I installed a lot of things, experimented with them a bit, and then
+decided that I don't want them anymore.
+
+I knew it was bad, and something to be dealt with. In the end of 2015, I
+was working on something that's recursive, and it inspired me to
+write a simple and elegant package manager B<rs>, since directory and files,
+which a package manager deals everyday, recursiveness is in their nature.
+
+B<rs> keeps a database of the metadata of every file that you didn't ask
+it to ignore, you will typically ask it to ignore something like C</tmp>,
+C</proc>, etc., if you're using it to manage system wide packages. With
+B<rs> you compile and install a package from source as usual, and when the
+installation process is done, you run C<rs diff oid>, B<rs> then starts
+a scan of the root directory into which you just installed your package,
+and during the scan process, it compares what's actually there with the
+database, calculate the difference between them as well as updating the
+database, and when the scan process ends, the difference is then tagged
+as C<oid> in the database, serialized and stored as C<oid.rs>, and the
+database is saved as well.
+
+This serialized difference is what B<rs> considers as a package, and it could
+be transferred across machines and installed using C<rs patch>, it's very
+much like a tarball, but I could not just use a tarball since I need to maintain
+all these metadata in the database when patching, instead of parsing a tarball
+I thought I might just use a trivial binary format that integrates well with
+B<rs> and suits my need.
+
+Being someone who came from LFS, I knew this is a game changer, it gave me a
+complete new experience, besides the ability to explore without any hesitation,
+I could easily upgrade, or switch between multiple versions of package;
+I could now compile once on desktop, and then install the compiled package
+on laptop, or vps; I could select a few packages, patch them, and then make
+a bootable usb disk or cdrom, or a complete environment that's suitable to
+put into a container and run web service. I sincerely believe anyone who
+likes LFS will like it, and anyone who likes the freedom of LFS but hated
+the inconvenience will like it also, since B<rs> eliminates ninety percent
+of the inconvenience yet without sacrificing even a tiny bit of the freedom.
+
+RSLinux is a Linux distribution, but not necessarily so, it's a way of doing
+things more. You do not need to take a full commitment using it as a
+distribution, there're almost always packages that you care about more and
+want to follow closely, while other people haven't packaged it for you,
+B<rs> is a perfect choice for this, you could use B<rs> to properly manage
+packages somewhere inside your home directory while still using your
+favorite distribution.
+
+Till this day, I still haven't tried systemd once, I don't know one single
+objective reason why I don't use it, but it's true enough that it's the
+very first motivation that got all these things started. I guess that's just
+how the world is, few things are objective while basically everything is
+subjective. Nevertheless, the goal of B<rs> is to avoid all these subjective
+feelings and views on how a distribution should be made, which init system
+should be used, what configure switches, compiling flags should be passed,
+whether stable version should be preferred over bleeding edge version or the
+other way around, how a filesystem hierarchy should be laid out. Whatever
+you feel is right, you just go for it, and what B<rs> does is to make this
+process easier, I would say that it's easy enough now, all the build instructions
+I used to build a distribution that I use everyday are only literally one
+hundred lines long.
+
+Still, RSLinux will never be easier than a classic distribution where other
+people do everything for you, but there're still many things to do and
+improve, and I do think in the long run the effort will be negligible
+and the reword will be immense. If you never tried LFS or something like
+it before, I suggest you use B<rs> to manage a couple of packages user wide
+while retain your distribution untouched, once you get your way around it,
+then maybe consider to jump on the ship, there's nothing to be afraid of.
+
+=head1 OPTIONS
+
+=over 4
+
+=item * --root=<dir>
+
+Specify the directory in which B<rs> will operate, it will scan this
+directory for newly installed files during a C<diff> operation, and
+will put or remove files under it during a C<patch>, C<remove> operation
+respectively.
+
+=item * --db=<file>
+
+Specify the database where all the metadata of the files and directories
+in C<root> is stored. If it doesn't exist yet B<rs> will create an empty
+one for you. But you should always specifiy it since it's used by
+all of the commands.
+
+=item * --pool=<dir>
+
+The direcory where a generated package will be stored during a C<diff>
+command. It's also occasionally used when you C<remove> a package, see
+the L</remove> command for more detail.
+
+=item * --prefix=<dir>
+
+Definitely the most used compiling option, all packages use it somewhere
+somehow during the compiling process. Defaults to the directory specified
+by C<--root>.
+
+=item * --compile-as=<user>
+
+Typically you need to run as root if you want to install a package globally
+into the system directory, however most packages recommend compiling as
+a non-privileged user and few even make it mandatory. If you specify this
+option, and you're running as root, B<rs> will switch to the user specified
+when compiling.
+
+=item * --compile-in=<dir>
+
+The directory to change into when compiling, if you use it with C<--compile-as>
+make sure the directory is writable by that user.
+
+=item * --build=<file>
+
+Building instructions, see L</build>.
+
+=item * --ign=<file>
+
+This is the file that specifies which directory/file should be ignored when doing
+a C<diff>, see L</ignore>.
+
+=item * --profile=<file>
+
+Since many options are used everytime, it would be really tedious to type them
+out each time you run B<rs>, a profile allows you to collect these options
+into a file so that you do not have to do it everytime, and you could easily
+switch between multiple profiles. See L</profile>.
+
+=item * --package=<package name>
+
+B<rs> will try to use the build instructions associated with this package
+name. Normally you don't have to specifiy this, since it's automatically
+calculated from C<oid>, for example, if you use C<perl-v5.22.3> as C<oid>,
+the package name will be C<perl>. Nontheless sometimes it could come in
+handy.
+
+=item * --subtree=<relative path>
+
+Typically when you install a package using C<rs patch> everything inside
+it will be installed, this option allows you install only some part of it.
+You could pass this option multiple times.
+
+=item * --prepared
+
+If you pass a directory as arugument to C<rs compile>, B<rs> will assume
+that it's a git directory, use this option if it's a prepared source
+directory instead.
+
+=item * --branch=<branch or tag>
+
+Checkout this branch or tag when compiling from a git directory. By default
+B<rs> will try to use the C<oid> you specified as the branch or tag to checkout.
+
+=item * --bootstrap
+
+Let B<rs> know that you're bootstrapping the toolchain, additional flags to
+set include path, library path, and dynamic interpreter will be passed to
+related compiling process, so that the final toolchain is self-contained.
+
+=item * --jobs=<number>
+
+How many parallel jobs should be used during C<make>.
+
+=item * --no-rm
+
+By default B<rs> will ask you if you want to remove the temporary build
+directory if you're compiling from a tarball or a git directory, if you
+toggle this option it will not try to remove the build directory.
+
+=back
+
+Note that all options should be specified before any command.
+
+In the following text sometimes I refer to the value of an option as
+the name of the option with the preceding C<--> removed, like C<pool>
+to mean the value of the option C<--pool>.
+
+=head1 COMMANDS
+
+=over 4
+
+=item * diff
+
+The C<diff> command takes one argument, C<oid>, it traverses the root
+directory and tag the difference between the content there and what's
+recorded in C<db> as C<oid>, and serializes it as C<oid.rs> in C<pool>.
+
+You can choose anything you want as C<oid>, usually you want to use
+something meaningful like the package name with the package version appended,
+such as C<gcc-6.4.0>.
+
+=item * compile
+
+The C<compile> command integrates the C<diff> and C<tag> commands to make
+it easier for you to install a package from source, it automatically
+compiles and installs a package, then does a C<diff> command followed
+by a C<tag> command.
+
+The compiling instructions are taken from the L</build> configuration file
+with the entry associated with the package name. The package name could
+be set explicitly by the C<--package> option, or more commonly it's derived
+from C<oid> by using the longest prefix of it before the C<-> character,
+for example, with C<man-pages-4.15> as oid the package name will default to
+C<man-pages>, and with C<perl-v5.22.3> it will be C<perl>.
+
+There're three types of compile commands, compile from a tarball, a git directory,
+or a prepared source tree.
+
+=over 4
+
+=item * compile <tarball>
+
+B<rs> will extract, compile, then install the tarball in the direcory
+C<compile-in>, or the current directory if it's not specified.
+The filename of the tarball, with the extension name like C<.tar.gz>,
+C<.tar.xz>, etc. stripped, is used as C<oid> to the C<diff> command. For
+example, if the tarball is C<man-pages-4.15.tar.xz>, the C<oid> will be
+derived as C<man-pages-4.15>, just C<mv> the tarball if you want to change
+the C<oid> to something different.
+
+=item * [--branch=<branch>] compile <git-directory> <oid>
+
+B<rs> will do a C<git clone> from the specified git directory, checkout branch
+or tag specified by the C<--branch> option or C<oid> if absent, in C<compile-in>,
+and then compile and install the package.
+
+=item * --prepared compile <source-directory> <oid>
+
+B<rs> will C<chdir> into the prepared source directory and start the compiling
+process, thus the C<compile-in> directory is ignored in this case. It's
+useful when you need more complex preparations of the source like applying some
+patches, or initializing git submodules, etc.
+
+=back
+
+The C<compile> command really covers ninety percent of the case, but it may
+not be flexible enough to compile every package in the wild, but that's
+actually okay, since you could always do a manual installation followed
+by a C<diff> command.
+
+=item * patch
+
+C<patch> takes one argument, a compiled package file <path/to/oid.rs>, which
+is produced by a previous C<diff> command, it then installs the package into
+C<root> and tag it as C<oid>.
+
+Optionally, one or more C<--subtree> could be provided so that only part of
+the package is installed, for example, C<--subtree=bin/> will instruct B<rs>
+to only install anything under the C<bin> directory of the package.
+
+=item * remove
+
+C<remove> takes one argument, the C<oid> of the package to be removed.
+
+Sometimes, different packages install files into the same location. B<rs>
+takes care of that by recording a list of owners associated with a file,
+along with the timestamps when ther're installed, that's why you are seeing
+all the C<oid>s floating around the manual, it means I<owner's id>. And
+when you remove a package, a file is removed if and only if this package
+is the most recent owner of it, and if it's not, nothing will happen,
+only the entry in the owner recording list will be removed. Also, if
+you're removing a package that's indeed the most recent owner of a file,
+but this file has multiple owners, then the file will be restored
+to the version of the second most recent owner. That's why I said earlier
+that the C<--pool> option is used not only when diffing, but also removing
+sometimes. Suppose the second most recent owner is C<oid>, then B<rs> will
+try to parse the compiled package C<oid.rs> in C<pool>, and restore the file
+according to it.
+
+=item * tag
+
+C<tag> takes one argument C<oid> and displays a list of files which are
+owned by it, followed by the detailed metadata about them in the database
+as JSON.
+
+=back
+
+=head1 CONFIGURATION FILES
+
+All configuration files are evaluated using Perl's C<do> statement and
+a hash reference is expected as the return value, with the exception
+that the L</build> configuration could also return a code reference.
+
+You don't necessarily have to know Perl to write the configuration files,
+you could just write them in JSON with the C<:> separator substituted
+as C<< => >>. That being said knowing a bit of Perl surely will help
+you use B<rs> to its best potential, and you don't have to be a Perl
+expert to write it, so don't be afraid.
+
+See also the released VM image to have a look at some sane configuration
+files and get you started.
+
+=over 4
+
+=item * profile
+
+This is a configuration file which collects options that you always need
+to specifiy.
+
+=back
+
+=cut
+
