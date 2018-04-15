@@ -1,24 +1,22 @@
 #!/usr/bin/env perl
-=license
 
-	Copyright © 2018 Yang Bo
+#   Copyright © 2018 Yang Bo
+#
+#   This file is part of RSLinux.
+#
+#   RSLinux is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   RSLinux is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
-	This file is part of RSLinux.
-
-	RSLinux is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
-
-	RSLinux is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
-
-=cut
 use App::rs 'sane', 'constant',
     iautoload => [qw/App::rs Term::ANSIColor Cwd/,
 		  ['List::Util', map { '0' . $_ } qw/reduce all/]];
@@ -226,40 +224,56 @@ sub runas {
 }
 sub crowded {
 	{subr => sub {
-		my $db = shift;
-		$db->{c} ? 1 : keys %{$db->{owner}{record}} > 1;
-	 },
-	 dir => 0,
-	 empty => 0};
+		my $o = shift;
+		if ($o->{event} eq 'ent') {
+			my $db = $o->{db};
+			$db->{c} ? 1 : keys %{$db->{owner}{record}} > 1;
+		}
+	 }, prophet => 0};
 }
 sub tag {
 	my $oid = shift;
 	{subr => sub {
-		my $db = shift;
-		$db->{c} ? $db->{owner}{$oid} : $db->{owner}{record}{$oid};
-	 },
-	 dir => 1,
-	 empty => 1};
+		my $o = shift;
+		if ($o->{event} eq 'ent') {
+			my $db = $o->{db};
+			$db->{c} ? $db->{owner}{$oid} : $db->{owner}{record}{$oid};
+		}
+	 }, prophet => 1};
+}
+sub list {
+	my $v = {};
+	{subr => sub {
+		my $o = shift;
+		if ($o->{event} eq 'ent') {
+			my $db = $o->{db};
+			add($v, $db->{c} ? %{$db->{owner}} : %{$db->{owner}{record}});
+		} elsif ($o->{event} eq 'ret') {
+			$v = [map { [$_, ''.localtime $v->{$_} ] } sort { $v->{$b} <=> $v->{$a} } keys %$v];
+		}
+	 }, prophet => 0};
 }
 sub filter {
 	my ($cp, $vp) = @_;
-	my ($v, $db, $d) = ({}, @$vp{qw/db d/});
-	say {$cp->{sink}} $d if $cp->{f}{dir};
+	my ($v, $f, $db, $d) = ({}, $cp->{f}{subr}, @$vp{qw/db d/});
+	say {$cp->{sink}} $d if $cp->{f}{prophet};
 	for (sort keys %$db) {
 		my ($p, $r) = ($db->{$_}, $d . $_);
-		if ($cp->{f}{subr}($p)) {
+		if ($f->({event => 'ent',
+			  ent => $_,
+			  db => $p})) {
 			say {$cp->{sink}} $r unless $p->{c};
 			if ($p->{c}) {
 				my $c = filter($cp, {db => $p->{c},
 						     d => $r . '/'});
 				$v->{$_} = {%$p,
-					    c => $c} if $cp->{f}{empty} or %$c;
+					    c => $c} if %$c or $cp->{f}{prophet};
 			} else {
 				$v->{$_} = $p;
 			}
 		}
 	}
-	$v;
+	$f->({event => 'ret'}) or $v;
 }
 sub confirm ($) {
 	state $s = colored('yes', 'bright_green') . ' or ' .
@@ -377,8 +391,8 @@ sub main {
 			chdir $d or die "chdir $d: $!.";
 			my $b = do {
 				my ($b, $v) = (do $s->{build}, $pkg);
-				$b = $b->($s);
-				$v = $b->{$v} until ref $v or not defined $v;
+				$b = $b->($s) if ref $b eq 'CODE';
+				$v = $b->{$v} until ref $v or not $v;
 				$v;
 			};
 			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
@@ -414,9 +428,30 @@ sub main {
 			chdir $o or die "chdir $o: $!.";
 			# the next steps.
 			push @ARGV, 'diff', $oid, 'tag', $oid;
-		} elsif ($op =~ /^(tag|crowded)$/) {
+		} elsif ($op =~ /^(tag|crowded|list|which)$/) {
+			no warnings 'once';
+			*which = sub {
+				my $r = shift;
+				if ($r =~ m{^/}) {
+					die colored("Absolute path $r not prefixed by $s->{root}", 'bright_red'), ".\n" unless 0 == index $r, $s->{root};
+					$r = substr $r, length $s->{root};
+				}
+				my ($d, @p) = (0, split m{/}, $r);
+				{subr => sub {
+					my $o = shift;
+					if ($o->{event} eq 'ent') {
+						my $u = $d >= @p || $o->{ent} eq $p[$d];
+						$d += 1 if $u and $o->{db}{c};
+						$u;
+					} elsif ($o->{event} eq 'ret') {
+						$d -= 1, 0;
+					}
+				 }, prophet => 1};
+			} if $op eq 'which';
 			my ($tab, $pid) = {tag => 1,
-					   crowded => 0};
+					   crowded => 0,
+					   list => 0,
+					   which => 1};
 			local $SIG{PIPE} = 'IGNORE';
 			do {
 				pipe my $r, my $w or die $!;
@@ -608,6 +643,9 @@ out each time you run B<rs>, a profile allows you to collect these options
 into a file so that you do not have to do it everytime, and you could easily
 switch between multiple profiles. See L</profile>.
 
+Not surprisingly, options in the command line take precedence over the
+ones in a profile.
+
 =item * --package=<package name>
 
 B<rs> will try to use the build instructions associated with this package
@@ -661,7 +699,7 @@ to mean the value of the option C<--pool>.
 
 =over 4
 
-=item * diff
+=item diff
 
 The C<diff> command takes one argument, C<oid>, it traverses the root
 directory and tag the difference between the content there and what's
@@ -671,7 +709,14 @@ You can choose anything you want as C<oid>, usually you want to use
 something meaningful like the package name with the package version appended,
 such as C<gcc-6.4.0>.
 
-=item * compile
+If the C<oid.rs> already exists in C<pool>, the new difference will be merged with
+the old, this way the C<diff> command could do limited amending, that's most
+useful when you forgot to install something, like documentation, you could
+always install it later and merge with the content you installed previously.
+See L</AMEND> for why amending using C<diff> is limited and how to do
+arbitrary amending.
+
+=item compile
 
 The C<compile> command integrates the C<diff> and C<tag> commands to make
 it easier for you to install a package from source, it automatically
@@ -720,7 +765,7 @@ not be flexible enough to compile every package in the wild, but that's
 actually okay, since you could always do a manual installation followed
 by a C<diff> command.
 
-=item * patch
+=item patch
 
 C<patch> takes one argument, a compiled package file <path/to/oid.rs>, which
 is produced by a previous C<diff> command, it then installs the package into
@@ -730,9 +775,11 @@ Optionally, one or more C<--subtree> could be provided so that only part of
 the package is installed, for example, C<--subtree=bin/> will instruct B<rs>
 to only install anything under the C<bin> directory of the package.
 
-=item * remove
+=item remove
 
 C<remove> takes one argument, the C<oid> of the package to be removed.
+B<rs> will remove both the content of the package under C<root> and
+its metadata in the database.
 
 Sometimes, different packages install files into the same location. B<rs>
 takes care of that by recording a list of owners associated with a file,
@@ -749,7 +796,7 @@ sometimes. Suppose the second most recent owner is C<oid>, then B<rs> will
 try to parse the compiled package C<oid.rs> in C<pool>, and restore the file
 according to it.
 
-=item * tag
+=item tag
 
 C<tag> takes one argument C<oid> and displays a list of files which are
 owned by it, followed by the detailed metadata about them in the database
@@ -774,12 +821,150 @@ files and get you started.
 
 =over 4
 
-=item * profile
+=item profile
 
 This is a configuration file which collects options that you always need
-to specifiy.
+to specifiy. The keys of the hash are option names while the values are,
+well, corresponding values. A typical profile looks like:
+
+    {db => '<file>',
+     build => '<file>',
+     ign => '<file>',
+     pool => '<dir>',
+     'compile-as' => '<user>',
+     'compile-in' => '<dir>',
+     root => '<dir>',
+     jobs => <number>}
+
+=item build
+
+This file specifies the building instructions, it's only used by the
+C<compile> command, the keys are package names while the values are
+hash references that detail the instructions on how the build process
+should be done. In the following text that explains the build process,
+you'll often see I<the value of something>, or I<if something exists>,
+it's talking about this hash.
+
+For many packages the build instruction is exactly the same, you could
+alias the build instruction of a package to another one by setting it
+to the name of the other package.
+
+As previous mentioned, instead of a hash reference, the C<build> file
+could also return a subroutine which will be called with a collection
+of the options, you could then return the building instructions differently,
+depending on whether you're bootstrapping or not, for an example.
+
+The build process is divided into several steps:
+
+=over 4
+
+=item 1. pre-configure
+
+If C<pre-configure> exists, the value of it should be a string and
+B<rs> will try to evaluate it with C<bash>, before running the
+C<configure> script.
+
+Usually something like C<autogen.sh> or C<bootstrap> is run in this step.
+
+=item 2. configure
+
+Unless there's a true value in the C<no-configure> slot, B<rs> will
+try to run the <configure> script, if it doesn't exist B<rs> will
+run C<autoreconf> to make one. A C<--prefix> switch is always passed,
+using the value of the C<prefix> option, along with the value of
+C<switch> slot, which if exists, should be an array reference of configure options
+that should be passed to the C<configure> script.
+
+B<rs> will pipe the output of C<configure> to the pager C<less>, since
+C<configure> usually outputs important information about if a package
+is properly configured, you should briefly scroll over the outputs, and
+exit the pager normally using the C<q> key, else you should type C<Ctrl-C>
+to abort the compile process if you think something is wrong.
+
+=item 3. post-configure
+
+Like C<pre-configure>, C<post-configure> should contain a string to
+be evaluated by C<bash>, it's run after the C<configure> script.
+It's usually coupled with C<no-configure> to build packages that
+don't use a C<configure> script.
+
+=item 4. make
+
+Unless C<no-make> is true, B<rs> will run C<make> to build the package,
+C<make-parameter> could be a reference to list of parameters that should
+be passed to make, the command line option C<jobs> tells how many parallel
+processes to use.
+
+=item 5. post-make
+
+The value of C<post-make> should be a string to be evaluated by C<bash> if
+exists, it's run after C<make> is finished, most commonly something
+like C<make check> or C<make tests> happens here.
+
+=item 6. make install
+
+B<rs> will run C<make install> to install the compiled package, the value of
+C<make-install-parameter> could be an array of parameters to be passed to C<make>.
+
+=item 7. post-make-install
+
+The value of C<post-make-install>, if exists, should be a string to be evaluated by
+C<bash>, it's run after C<make install>, if you want to make some symbolic links,
+remove some undesired files after installation, that's the place to go.
 
 =back
+
+An example C<build> file:
+
+    {gmp => {'post-make' => 'make check'},
+     mpfr => 'gmp',
+     'man-pages' => {'no-configure' => 1,
+		     'no-make' => 1},
+     ncurses => {switch => [qw/--with-shared --without-debug/]},
+     'XML-Parser' => {'no-configure' => 1,
+		      'post-configure' => 'perl Makefile.PL',
+		      'post-make' => 'make test'},
+     git => {'make-parameter' => [qw/all doc/],
+	     'make-install-parameter' => [qw/install-doc install-html/]}}
+
+=item ignore
+
+This is typically used when you're installing into a system-wide location,
+you certainly would not want to include the content of C</proc>, C</sys>
+into your package during a C<diff> command, and this file is where to
+put it.
+
+If you want to ignore a file/directory completely, at the top level,
+add a hash entry with the name as the key and C<1> as the value. For
+a directory, you may want to be more specific, like ignore only part
+of it while care for the rest, then you should make the value a hash
+to specify what should be ignored under this directory, and if some
+of sub-directories should also be partially ignored then you nest a
+hash inside again. So yeah, it's recursive and like a tree, naturally.
+
+Suppose you want to ignore C</proc> and </sys> completely,
+C<resolv.conf> and C<hosts> inside C</etc> but not the others, you
+could write:
+
+    {proc => 1,
+     sys => 1,
+     etc => {'resolv.conf' => 1,
+	     hosts => 1}}
+
+=back
+
+=head1 ADVANCED
+
+=head2 AMEND
+
+In the description of the C<diff> command a brief introduction to amending
+is included, but it's limited and you could only add or overwrite things.
+So why is that? You may get the impression now that B<rs> acts more like a
+version control system than a traditional package manager, while that's true,
+it's also not a version control system, it expects the packages that it manage
+to be independent to an extent, i.e. during the installation of a package
+a file/directory of another package will not suddenly be removed, that's really
+normal for a vcs since a patch in a vcs is always applied to a previous state,
 
 =cut
 
