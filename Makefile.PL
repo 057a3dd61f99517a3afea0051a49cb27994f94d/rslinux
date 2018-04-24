@@ -21,8 +21,17 @@
 require Devel::PPPort;
 Devel::PPPort::WriteFile();
 use ExtUtils::MakeMaker;
+my $me = '://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux';
 WriteMakefile(NAME => 'App::rs',
 	      ABSTRACT => 'package manager of RSLinux',
 	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
 	      EXE_FILES => ['bin/rs'],
+	      MAN3PODS => {},
+	      VERSION => 1.01,
+	      META_MERGE => {resources => {repository => {type => 'git',
+							  url => "git$me.git",
+							  web => "https$me"},
+					   homepage => "https$me",
+					   bugtracker => {web => "https$me/issues"}},
+			     'meta-spec' => {version => 2}},
 	      LICENSE => 'gpl_3');
