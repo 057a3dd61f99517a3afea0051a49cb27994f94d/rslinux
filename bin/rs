@@ -276,8 +276,8 @@ sub filter {
 	$f->({event => 'ret'}) or $v;
 }
 sub confirm ($) {
-	state $s = colored('yes', 'bright_green') . ' or ' .
-	    colored('no', 'bright_red') . ': ';
+	state $s = colored('yes', 'green', 'bold') . ' or ' .
+	    colored('no', 'red', 'bold') . ': ';
 	print shift, ', ', $s;
 	while (1) {
 		chomp(my $a = <STDIN>);
@@ -288,9 +288,9 @@ sub confirm ($) {
 }
 sub rs_unparse_wrap {
 	my $o = shift;
-	print colored("Writing $o->{d}", 'bright_yellow'), ': ';
+	print colored("Writing $o->{d}", 'yellow', 'bold'), ': ';
 	rs_unparse(@$o{qw/v fd/});
-	say colored('done', 'bright_green'), '.';
+	say colored('done', 'green', 'bold'), '.';
 }
 sub main {
 	my $s;
@@ -366,7 +366,7 @@ sub main {
 				# drop root privilege before compile, as suggested by many packages.
 				my $u = $s->{'compile-as'} || $ENV{USER};
 				if ($u eq 'root') {
-					say color('bold red'), 'You are compiling as root!', color('reset');
+					say colored('You are compiling as root!', 'red', 'bold');
 					$root = 0;
 				} else {
 					runas($u);
@@ -433,7 +433,7 @@ sub main {
 			*which = sub {
 				my $r = shift;
 				if ($r =~ m{^/}) {
-					die colored("Absolute path $r not prefixed by $s->{root}", 'bright_red'), ".\n" unless 0 == index $r, $s->{root};
+					die colored("Absolute path $r not prefixed by $s->{root}", 'red', 'bold'), ".\n" unless 0 == index $r, $s->{root};
 					$r = substr $r, length $s->{root};
 				}
 				my ($d, @p) = (0, split m{/}, $r);
