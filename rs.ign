@@ -40,4 +40,5 @@
  # to make firejail happy.
  root => 1,
  texlive => 1,
- p => 1}
+ p => 1,
+ 0 => 1}

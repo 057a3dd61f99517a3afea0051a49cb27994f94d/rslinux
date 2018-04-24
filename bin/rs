@@ -91,7 +91,7 @@ sub diff {
 				}
 			} else {
 				my $n = 1 if $t == S_IFREG and not $m->{hl};
-				strip($f, $m) if $n;
+				strip($f, $m) if $n and $cp->{wet};
 				my $p = $db->{$_} = {%$m,
 						     owner => $db->{$_}{owner}};
 				$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
@@ -316,6 +316,7 @@ sub main {
 			my $v = diff({ih => {},
 				      root => $s->{root},
 				      oid => $oid,
+				      wet => !$s->{dry},
 				      ts => time}, {db => $db,
 						    ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
 						    d => ''});
@@ -494,8 +495,17 @@ App::rs - The package manager for RSLinux
     # remove a package.
     rs remove <oid>
 
-    # show the package tagged as oid.
+    # display the package tagged as oid.
     rs tag <oid>
+
+    # show relative entry in database
+    rs which <path>
+
+    # print a list of installed packages
+    rs list
+
+    # find places where multiple packages tried to install
+    rs crowded
 
 =head1 DESCRIPTION
 
@@ -572,9 +582,11 @@ should be used, what configure switches, compiling flags should be passed,
 whether stable version should be preferred over bleeding edge version or the
 other way around, how a filesystem hierarchy should be laid out. Whatever
 you feel is right, you just go for it, and what B<rs> does is to make this
-process easier, I would say that it's easy enough now, all the build instructions
-I used to build a distribution that I use everyday are only literally one
-hundred lines long.
+process easier. Since the packaging by C<diff> method is general, it works
+with every single package with no exception, you don't need any tweak for
+an individual package, thus most packages need zero configuration, and all
+the build instructions I used to build a distribution that I use everyday
+are only literally one hundred lines long.
 
 Still, RSLinux will never be easier than a classic distribution where other
 people do everything for you, but there're still many things to do and
@@ -687,6 +699,11 @@ By default B<rs> will ask you if you want to remove the temporary build
 directory if you're compiling from a tarball or a git directory, if you
 toggle this option it will not try to remove the build directory.
 
+=item * --dry
+
+Tell the C<diff> command to only show the difference, neither gernerate
+package nor update the database.
+
 =back
 
 Note that all options should be specified before any command.
@@ -715,6 +732,11 @@ useful when you forgot to install something, like documentation, you could
 always install it later and merge with the content you installed previously.
 See L</AMEND> for why amending using C<diff> is limited and how to do
 arbitrary amending.
+
+If the option C<dry> is given, the difference will only be displayed, that's
+handy to check if your system is consistent with what's recorded in the database,
+the difference should be empty if you didn't do a mannual installation, or you
+can have a preview of what's installed if you did do that.
 
 =item compile
 
@@ -787,7 +809,7 @@ along with the timestamps when ther're installed, that's why you are seeing
 all the C<oid>s floating around the manual, it means I<owner's id>. And
 when you remove a package, a file is removed if and only if this package
 is the most recent owner of it, and if it's not, nothing will happen,
-only the entry in the owner recording list will be removed. Also, if
+only the entry in the owner recording list will be removed. On the other hand, if
 you're removing a package that's indeed the most recent owner of a file,
 but this file has multiple owners, then the file will be restored
 to the version of the second most recent owner. That's why I said earlier
@@ -802,13 +824,33 @@ C<tag> takes one argument C<oid> and displays a list of files which are
 owned by it, followed by the detailed metadata about them in the database
 as JSON.
 
+=item which
+
+Takes an absolute path or a path that's relative to the C<root>, display
+its entry in the database, useful to find out to which package a file belongs.
+
+=item list
+
+Print a full list of installed packages, sorted from the most recent to the least.
+
+=item crowded
+
+Find out the crowded places, where more than one package likes to reside, that's
+useful if you want a file from a specific package, and also to discover
+accidental overwrite.
+
 =back
 
 =head1 CONFIGURATION FILES
 
+(Note I intentionally blur the difference between things like a hash and a hash
+reference in the following text, since it's easier to type, and also to comprehend
+for non-Perl speakers, Perl speakers should always know what I'm talking
+about.)
+
 All configuration files are evaluated using Perl's C<do> statement and
-a hash reference is expected as the return value, with the exception
-that the L</build> configuration could also return a code reference.
+a hash is expected as the return value, with the exception
+that the L</build> configuration could also return a subroutine.
 
 You don't necessarily have to know Perl to write the configuration files,
 you could just write them in JSON with the C<:> separator substituted
@@ -840,7 +882,7 @@ well, corresponding values. A typical profile looks like:
 
 This file specifies the building instructions, it's only used by the
 C<compile> command, the keys are package names while the values are
-hash references that detail the instructions on how the build process
+hashes that detail the instructions on how the build process
 should be done. In the following text that explains the build process,
 you'll often see I<the value of something>, or I<if something exists>,
 it's talking about this hash.
@@ -849,7 +891,7 @@ For many packages the build instruction is exactly the same, you could
 alias the build instruction of a package to another one by setting it
 to the name of the other package.
 
-As previous mentioned, instead of a hash reference, the C<build> file
+As previous mentioned, instead of a hash, the C<build> file
 could also return a subroutine which will be called with a collection
 of the options, you could then return the building instructions differently,
 depending on whether you're bootstrapping or not, for an example.
@@ -872,26 +914,29 @@ Unless there's a true value in the C<no-configure> slot, B<rs> will
 try to run the <configure> script, if it doesn't exist B<rs> will
 run C<autoreconf> to make one. A C<--prefix> switch is always passed,
 using the value of the C<prefix> option, along with the value of
-C<switch> slot, which if exists, should be an array reference of configure options
+C<switch> slot, which if exists, should be an array of configure options
 that should be passed to the C<configure> script.
 
-B<rs> will pipe the output of C<configure> to the pager C<less>, since
-C<configure> usually outputs important information about if a package
-is properly configured, you should briefly scroll over the outputs, and
-exit the pager normally using the C<q> key, else you should type C<Ctrl-C>
-to abort the compile process if you think something is wrong.
+B<rs> will pipe the output of C<configure> to the pager C<less>,
+since C<configure> usually outputs important information about whether
+a package is properly configured, you should briefly scroll over the
+outputs, and exit the pager normally using the C<q> key to start C<make>,
+after the C<configure> script stopped procuding output, you don't want
+to start C<make> before C<configure> finishes.  If you find something
+wrong in the C<configure> outputs, you should type C<Ctrl-C> to abort
+the compile process.
 
 =item 3. post-configure
 
 Like C<pre-configure>, C<post-configure> should contain a string to
-be evaluated by C<bash>, it's run after the C<configure> script.
+be evaluated by C<bash>, it will be run after the C<configure> script.
 It's usually coupled with C<no-configure> to build packages that
 don't use a C<configure> script.
 
 =item 4. make
 
 Unless C<no-make> is true, B<rs> will run C<make> to build the package,
-C<make-parameter> could be a reference to list of parameters that should
+C<make-parameter> could be an array of parameters that should
 be passed to make, the command line option C<jobs> tells how many parallel
 processes to use.
 
@@ -965,6 +1010,237 @@ it's also not a version control system, it expects the packages that it manage
 to be independent to an extent, i.e. during the installation of a package
 a file/directory of another package will not suddenly be removed, that's really
 normal for a vcs since a patch in a vcs is always applied to a previous state,
+but a patch in B<rs> could always be applied to nothing, much like you could
+always extract a tarball into an empty directory, in the terminology of C<git>,
+that is, a patch in B<rs> doesn't have a parent.
+
+In fact, I never encountered any package that removes files during a
+C<make install>, it overwrites files at worst, and B<rs> will handle that
+well.
+
+But there're indeed sometimes you installed more than you should and you
+want to remove things you don't want from a package, well, first you should
+C<remove> this package completely, then C<patch> it using a temporary C<root>
+and C<db>, do whatever you want with this temporary C<root> using shell
+commands, file mangager, emacs or whatever you want and then do a C<diff>
+with the same C<root>, an empty C<db> and a temporary C<pool>, after that
+you should move the newly generated B<rs> package into your normal C<pool>
+and C<patch> that with your usual configuration. Yeah, that maybe a little
+bit complicated, but it rarely happens, just know it could be done and
+refer to this section again when you find yourself in this kind of situation.
+
+=head2 UPGRADE
+
+If a package is not essential to build itself it's really easy to upgrade
+it, just C<remove> it and then install it again, so while it's trivial to upgrade
+wget or curl, you need more consideration to upgrade glibc.
+
+The problem is that usually C<make install> uses the command C<install> to
+do the installation, and the C<install> command overwrites a file instead
+of removing it and create a new one with same name.  That's actually
+pretty different, since overwrite a file while there're still other
+process accessing it will cause undefined results, but remove a file
+and create a new one with the same name will not influence any other
+process that's still accessing the removed file in any way since they're
+two different files.
+
+So, you have to make sure that no other process is accessing a file when
+when you overwrite it, which is impossible for C<make> itself, to say the
+least, and any program C<make install> launched when you're overwriting it.
+Or you have to remove it before C<make install> but you certainly cannot
+remove C<make> since you need C<make> to do C<make install>. That's the
+reason not to throw your toolchain away when you are done bootstrapping,
+the toolchain resides in a different path and you don't have to worry about
+it getting overwritten, and it provides a complete environment for building
+so you could safely remove any package even glibc, while using this
+environment to build a new one.
+
+In summary, always remove a package before install a new version of it by
+compiling from source, usually you don't want to overwrite files unless
+you're absolutely sure no one is using them. And use the toolchain to
+build the package if the package requires itself to do C<make install>.
+
+=head2 INSTALLATION
+
+=over 4
+
+=item 1. No installation at all
+
+With the advancing with various namespaces, this kind of installation
+actually makes perfect sense, you could boot and live with your favorite
+distribution while entering RSLinux in isolated namespaces for
+exploration. Since VM images are used for release it's very easy to
+do so by mounting the image directly.
+
+=item 2. Live replace
+
+You could do installation by simply swap directories under your current
+root and the ones under your newly prepared system, what you need is
+a third environment to do the actual swap, so that you are safe since
+everything under the main system will be unavailable during moving.
+
+The third environment doesn't need to be large, just C<bash> and C<coreutils>
+could be enough for the swapping task, C<patch> a few more packages to help
+you if you feel unsafe. Then you enter this container with the root directory
+bind mounted somewhere under it, and start moving things around, also pray
+that electricity won't be cut while you're doing it.
+
+This method is the best option to install RSLinux on a system that's already
+running Linux, and probably the only option to install it on a OpenVZ based VPS.
+
+=item 3. Bootable media
+
+If a system is not running Linux already, you cannot use the live replace
+method to install RSLinux, you have to use a bootable media like USB disk
+or CDROM.
+
+A USB disk is handy to do installation locally while a CDROM image is
+suitable to install remotely on a KVM based VPS. For both situations
+the most important utilities to include are probably the ones to do
+disk partition and filesystem formatting, for remote installation, it's
+best to make the CDROM image as small as possible and transfer all the
+packages to be installed via network at some later point since it's much easier
+to re-upload the image if you forgot to C<patch> some vital packages into it,
+so be sure to include something like C<socat> or C<rsync> or C<openssh>
+for C<scp> depending on your mood or taste, and of course the C<iproute2>
+package and necessary kernel modules to bring up the network.
+
+=back
+
+=head3 A faithful record of live replace installation on a VPS
+
+I now have a complete RSLinux system inside a directory on my VPS, I have
+already entered it several times and I'm confident that it's good, and the
+next step is to swap it with the current distribution.
+
+Since it's a VPS I must login remotely, so in addition to C<bash> and
+C<coreutils> I will C<patch openssh> in the third sanctuary as well,
+so that's the list of things I want directly. Now the dependencies,
+well, definitely C<base> since it setups the directories that a sane
+person will always want, and needless to say C<glibc>, since I always
+compile C<bash> with curses so C<ncurses> as well, and C<openssl> since
+that's what C<openssh> is built upon. So the complete list is
+C<base glibc ncurses bash coreutils openssl openssh>. Now I'm going to try and see
+how it works out.
+
+Well, apparently C<openssh> needs C<zlib> as well, that's the only thing I
+forgot, after C<patch zlib> I successfully entered this sanctuary with the
+root directory bind mounted somewhere under it and launched C<sshd> on a
+different port, confirmed that I could login through it. Then I did the
+actual swap, moved everything under root to a backup directory, well,
+except the usually mounted C</proc /sys /dev>, since it's meaningless to
+C<umount> them and then C<mount> later, after that I moved all the directories
+of the already prepared RSLinux into root, then I entered this fresh root,
+played around a little bit, launched C<sshd> and ended the session with
+the C<sshd> of the sanctuary.
+
+Finally, I did a login through the C<sshd> of RSLinux I just launched, cleaned
+up all the applications of the old system and sanctuary that're still running,
+and mountpoints related to them. After that I did a C<rm -rf> on the backup
+directory and the sanctuary to celebrate, the installation is done!
+
+So yeah, the previously mentioned eight packages are guaranteed to do a
+successful live replacing installation, and I'm sure you can reduce the
+number even more if you want. It surely is an exicting, adventurous, and
+fruitful journey for me, and it's not that hard, so don't hesitate to give
+it a try.
+
+=head1 PERFORMANCE
+
+B<rs> is actually pretty efficient, all the serializations routines are
+written in C<C>, the first C<diff> operation will probably take some
+noticeable time if you're not using a SSD since all the metadata is not
+yet cached, that's just like the first C<git status> command inside a
+repository, but the succesives ones take negligible time. Also note that
+the C<diff> operation is only needed on the machine that does the actual
+compilation, which will usually be the most powerful one you can get your
+hands on, if you only install pre-compiled packages on a machine that's
+really just like extracting a tarball, performance is not an issue there.
+
+=head1 CONTRIBUTING
+
+Try it! Download the VM image and play around with it, share your thoughts,
+make suggestions or reporting bugs. Spread the word around if you find it
+good or useful.
+
+At some later point you may want to have a look at the guts of B<rs>, try
+to add a new functionality or fix an existing problem, I'll always be
+glad to see a new quality pull request.
+
+You can also contribute by hiring me or help getting me hired,
+if you find me appropriate for a job, a stable living for the author
+is surely inevitable for a healthy project.
+
+=head1 VM image
+
+A VM image to be used with C<qemu> in raw format is released on
+L<github|https://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux/releases>
+as a demostration of RSLinux, it contains all the neccessary packages
+to build itself, as well as some basic utilities.
+
+You should first decompress the image using C<xz -d>, then launch it via:
+
+    # qemu-system-x86_64 -machine accel=kvm -hda vm.img -m 512M -net nic -net user,hostfwd=::2222-:2222
+
+A C<sshd> will be running in the guest and you could login through it using
+C<ssh -p 2222 user@localhost>, the password for root is C<rslinux>, there's
+also a non-privileged user C<somebody> with the same password in case you
+do not like wandering around with root. You could also forget about C<ssh>
+all together and use the GUI of C<qemu> if you happen to like it.
+
+For simplicity, I used a Perl one liner as the init system, it's a poor
+man's init but it does the job, it starts twelve virtual consoles from
+C<tty1> to C<tty12> but it doesn't restart them, so don't be confused
+if you logged out but a new login prompt is not displayed, just restart
+the VT mannually using C<setsid /sbin/agetty ttyX>. Feel free to change the
+init system to whatever you like, the whole point of RSLinux is to go
+for it instead of doing meaningless arguing with others.
+
+The B<rs> profile is already properly written under the home of C<root>, it's
+highly recommended to login as C<root> first, and have a look at how all the
+configuration files are chained together, and play around a little bit to
+get familiar with B<rs>. There're two source tarballs, one of C<emacs> and
+another of C<vim>, try compile your favorite editor using C<rs compile tarball>
+and see how a package is generated using B<rs>. The C<rs> directory is the
+git repository of B<rs>, and the B<pkg> directory contains the compiled
+packages and database for the VM image. Happy hacking, and remember C<man rs>
+is your friend.
+
+You could also mount the image directly using:
+
+    # mount -o offset=$((2048*512)) vm.img mountpoint
+
+And then enter the mountpoint and use it without C<qemu>, by entering
+I mean all the methods from C<unshare> to a full fledged container utility
+and to a plain C<chroot>, pick the one you like best.
+
+=head1 BUILDING
+
+Just follow the usual idiom to build a Perl module:
+
+    # perl Makefile.PL
+    # make
+    # make install
+
+That will install B<rs> to your system directory and it's recommended since
+you do not have to mess around with the PATH or PERLLIB environment. You could
+also install to a custom directory by using:
+
+    # perl Makefile.PL INSTALL_BASE=/path/to/prefix
+
+The executable will reside in the C<bin> direcory under prefix and the Perl
+modules will be in C<lib/perl5/x86_64-linux>, the C<x86_64-linux> part will
+be different if you're using a architecture other than C<x86_64>. Adjust your
+PATH and PERLLIB accordingly.
+
+=head1 LICENSE
+
+The package manager B<rs> as well as the RSLinux VM image are released
+under GPLv3.
+
+=head1 AUTHOR
+
+Yang Bo <rslovers@yandex.com>
 
 =cut
 
