@@ -41,7 +41,7 @@ BEGIN {
 			if ($q eq 'iautoload') {
 				my (@pkg, %map, @l);
 				for (@{+shift}) {
-					my ($p, @f) = ref ? @$_ : $_;
+					my ($p, @f) = ref() ? @$_ : $_;
 					push @pkg, $p;
 					for (@f) {
 						push @l, $ns . $_ if s/^0//;
