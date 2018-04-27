@@ -220,8 +220,3 @@ utimensat(char *f, int t)
 		RETVAL = !utimensat(AT_FDCWD, f, times, AT_SYMLINK_NOFOLLOW);
 	OUTPUT:
 		RETVAL
-
-bool
-setresuid(uid_t uid, uid_t euid, uid_t suid)
-	POSTCALL:
-		RETVAL = !RETVAL;

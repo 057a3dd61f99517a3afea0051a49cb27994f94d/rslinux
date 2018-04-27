@@ -216,9 +216,9 @@ sub runas {
 	if ($u ne 'root') {
 		my ($uid, $gid) = (getpwnam $u)[2, 3];
 		($(, $)) = ($gid, "$gid $gid");
-		setresuid($uid, $uid, 0);
+		($<, $>) = ($uid, $uid);
 	} else {
-		setresuid(0, 0, 0);
+		($<, $>) = (0, 0);
 		($(, $)) = (0, '0 0');
 	}
 }
