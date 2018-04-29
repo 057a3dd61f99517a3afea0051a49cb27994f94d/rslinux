@@ -182,7 +182,7 @@ sub rm {
 					 d => $r . '/'});
 				delete $o->{$cp->{oid}};
 				if (not %$o) {
-					rmdir $f or die "unable to rmdir $f: $!.";
+					rmdir $f or die "unable to rmdir $f: $!." if $cp->{hard};
 					delete $db->{$_};
 				}
 			}
@@ -190,12 +190,17 @@ sub rm {
 			my $d = $o->{record};
 			if (delete $d->{$cp->{oid}}) {
 				if ($o->{current} eq $cp->{oid}) {
-					unlink $f or warn "unable to unlink $f: $!.";
+					unlink $f or warn "unable to unlink $f: $!." if $cp->{hard};
 					if (%$d) {
-						my $oid = reduce { $d->{$b} > $d->{$a} ? $b : $a } keys %$d;
-						my $p = $cp->{patch}{$oid} ||= {v => rs_parse($cp->{pool} . $oid . '.rs'),
-										p => {}};
-						grow(@$p{qw/p v/}, $r);
+						if ($cp->{hard}) {
+							my $oid = reduce { $d->{$b} > $d->{$a} ? $b : $a } keys %$d;
+							my $p = $cp->{patch}{$oid} ||= {v => rs_parse($cp->{pool} . $oid . '.rs'),
+											p => {}};
+							grow(@$p{qw/p v/}, $r);
+						} else {
+							# %$p{qw/owner mode/}.
+							delete @$p{grep { !/owner|mode/ } keys %$p};
+						}
 					} else {
 						delete $db->{$_};
 					}
@@ -309,8 +314,8 @@ sub main {
 		if ($op eq 'diff') {
 			my $oid = shift @ARGV;
 			my ($p, $_v) = $s->{pool} . $oid . '.rs';
-			if (-e $p) {
-				say "$p exists, will merge with new generated patch tree.";
+			if (-e $p and not $s->{dry}) {
+				say "$p exists, will merge with newly generated patch tree.";
 				$_v = rs_parse($p);
 			}
 			my $v = diff({ih => {},
@@ -349,12 +354,14 @@ sub main {
 			my $oid = shift @ARGV;
 			rm({root => $s->{root},
 			    oid => $oid,
+			    hard => !$s->{soft},
 			    pool => $s->{pool},
 			    patch => my $p = {}}, {db => $db,
 						   d => ''});
 			$mod = 1;
 			my $ts = time;
 			for (keys %$p) {
+				$s->{soft} and die;
 				patch({root => $s->{root},
 				       oid => $_,
 				       ts => $ts}, {v => $p->{$_}{p},
@@ -534,7 +541,7 @@ was working on something that's recursive, and it inspired me to
 write a simple and elegant package manager B<rs>, since directory and files,
 which a package manager deals everyday, recursiveness is in their nature.
 
-B<rs> keeps a database of the metadata of every file that you didn't ask
+B<rs> keeps a database of the metadata of every file/directory that you didn't ask
 it to ignore, you will typically ask it to ignore something like C</tmp>,
 C</proc>, etc., if you're using it to manage system wide packages. With
 B<rs> you compile and install a package from source as usual, and when the
@@ -704,6 +711,12 @@ toggle this option it will not try to remove the build directory.
 Tell the C<diff> command to only show the difference, neither gernerate
 package nor update the database.
 
+=item * --soft
+
+Used with C<remove>, such that no file/directory will be removed, but
+the entries in the database will be removed as usual, it's used to
+do arbitrary L<amending|/AMEND>.
+
 =back
 
 Note that all options should be specified before any command.
@@ -795,7 +808,9 @@ C<root> and tag it as C<oid>.
 
 Optionally, one or more C<--subtree> could be provided so that only part of
 the package is installed, for example, C<--subtree=bin/> will instruct B<rs>
-to only install anything under the C<bin> directory of the package.
+to only install anything under the C<bin> directory of the package. It's
+also particularly handy to let a file be from a specific package, if there're
+multiple packages that contain it.
 
 =item remove
 
@@ -987,7 +1002,7 @@ to specify what should be ignored under this directory, and if some
 of sub-directories should also be partially ignored then you nest a
 hash inside again. So yeah, it's recursive and like a tree, naturally.
 
-Suppose you want to ignore C</proc> and </sys> completely,
+Suppose you want to ignore C</proc> and C</sys> completely,
 C<resolv.conf> and C<hosts> inside C</etc> but not the others, you
 could write:
 
@@ -1001,6 +1016,9 @@ could write:
 =head1 ADVANCED
 
 =head2 AMEND
+
+You may find that you forgot to install something, or you installed more than
+you should from a package, the process of fixing all that up is called I<amend>.
 
 In the description of the C<diff> command a brief introduction to amending
 is included, but it's limited and you could only add or overwrite things.
@@ -1028,6 +1046,21 @@ you should move the newly generated B<rs> package into your normal C<pool>
 and C<patch> that with your usual configuration. Yeah, that maybe a little
 bit complicated, but it rarely happens, just know it could be done and
 refer to this section again when you find yourself in this kind of situation.
+
+=head3 Amend by soft C<remove>
+
+In comparison with amending by C<diff>, where you could only add or overwrite
+things, this method allows you do arbitrary amending.
+
+First, you do a soft C<remove> with the package you want to amend, then
+you delete or overwrite anything of this package or add things to it,
+after that remove the compiled package in C<pool>, finally you run C<diff>
+to generate the new modified package.
+
+Since it relies on the filesystem to generate package, if some of its files
+are overwritten by others, then they're lost, it may very well be what you
+want, or not, you could always do the C<patch diff patch> method mentioned
+previously.
 
 =head2 UPGRADE
 
