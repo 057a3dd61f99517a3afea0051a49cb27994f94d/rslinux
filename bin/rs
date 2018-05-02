@@ -1140,7 +1140,7 @@ package and necessary kernel modules to bring up the network.
 
 =back
 
-=head3 A faithful record of live replace installation on a VPS
+=head3 A faithful recording of live replace installation on a OpenVZ based VPS
 
 I now have a complete RSLinux system inside a directory on my VPS, I have
 already entered it several times and I'm confident that it's good, and the
@@ -1177,6 +1177,52 @@ successful live replacing installation, and I'm sure you can reduce the
 number even more if you want. It surely is an exicting, adventurous, and
 fruitful journey for me, and it's not that hard, so don't hesitate to give
 it a try.
+
+=head3 A faithful recording of CDROM installation on a KVM based VPS
+
+The first step is of course making a list of the packages that I need,
+since this is a KVM based VPS I need to do disk partition, so C<fdisk>
+from C<util-linux> is absolutely necessary, and needless to say the
+C<mount> command from it, and in order to C<mount> I have to format it
+first, so C<e2fsprogs> as well, and I like C<syslinux> as the bootloader
+so include that too. The next thing to consider is how to transfer the
+compiled packages, I never include them in the iso image since I don't
+want to upload a big iso file again if I made a mistake, instead they're
+transferred using network, this immediately implies that C<iproute2>
+is required, while there may be some circumstances that you don't need a
+encrypted connection, but I think I'll just stick to C<scp> of C<openssh>,
+for good practice, and the additional benefit to login via C<ssh> if
+the installation is complicated, so add C<openssh> to list.  Also, I
+definitely want to pack things into a tarball, so put C<tar> on the list
+so that I could unpack them later.  Finally, C<bash> and C<coreutils>
+of course, they're essential for the commandline.
+
+That's everything I need directly, but since it's expected to boot from
+this environment, a init system, kernel modules, C<eudev>, C<kmod> are
+also required, I always use my one-liner Perl script as the init system
+so I will patch C<perl> as well.
+
+Now the dependencies, C<openssl zlib> are required for C<openssh>,
+C<ncurses> is required for C<bash>, and C<glibc> is required by
+everybody, and C<base> for a sane person, so the final list is C<base
+glibc ncurses bash coreutils util-linux e2fsprogs syslinux openssl zlib
+openssh iproute2 perl eudev kmod tar>, now I'am going to C<patch> them into a
+temporary directory and make a bootable iso out of it and see how things
+are going.
+
+So I C<patch>ed all the packages, copied the kernel and its modules, along with
+relative C<isolinux> file and configuration, setup the script to boot, and
+finally generated the iso using C<mkisofs>. After that I launched to C<qemu>
+to test it, well, I forgot that C<agetty> will launch the C<login> program
+which is from C<shadow-utils>, and the C<ip> command will link against
+C<libmnl> if available, but that's fine, I C<patch>ed them and regenerated
+the iso, did extensive testing on it and became pretty confident that it's solid.
+
+And with all these preparations done the rest was really easy and smooth, I
+uploaded the iso file and booted the VPS, did disk partition first, formatted
+the filesystems after that, and then installed the bootloader, finally tranferred
+the root filesystem tarball using C<scp> and extracted it. I rebooted the
+VPS and saw a login prompt as a indication of success, the installation is done!
 
 =head1 PERFORMANCE
 
