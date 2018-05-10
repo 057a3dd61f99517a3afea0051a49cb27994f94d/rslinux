@@ -1,2 +1,8 @@
-1.01 - 2018-04-24
-	- Initial release.
+v1.01.001 - 2018-05-10
+	  - Another faithful recording series.
+	  - Arbitrary amending by soft remove.
+	  - Support older perl when ?PATTERN? is valid.
+	  - Got rid of setresuid.
+
+v1.01 - 2018-04-24
+      - Initial release.

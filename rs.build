@@ -126,5 +126,8 @@ EOF
 	 fftw => {switch => [qw/--enable-shared --enable-threads/]},
 	 squid => {'pre-configure' => './bootstrap.sh',
 		       switch => [qw/--with-openssl --enable-ssl-crtd/]},
+	 pcre => {switch => [qw/--enable-jit --enable-utf --enable-unicode-properties --enable-newline-is-any --enable-pcregrep-libz --enable-pcretest-libreadline/],
+		  'post-make' => 'make check'},
+	 dialog => {switch => [qw/--with-ncursesw --enable-nls --with-shared/]},
 	 'pkg-config' => {switch => [qw/--with-internal-glib/]}};
 };
