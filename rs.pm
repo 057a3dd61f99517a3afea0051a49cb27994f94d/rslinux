@@ -23,15 +23,11 @@ use strict;
 use warnings qw/all FATAL uninitialized/;
 use feature qw/state say/;
 
-use XSLoader;
+require XSLoader;
 XSLoader::load();
 
 BEGIN {
 	no strict 'refs';
-	my $c = {S_IFMT => 0170000,
-		 S_IFLNK => 0120000,
-		 S_IFREG => 0100000,
-		 S_IFDIR => 0040000};
 	my @H = ($^H, ${^WARNING_BITS}, %^H);
 	sub import {
 		my $ns = caller . '::';
@@ -57,7 +53,8 @@ BEGIN {
 					for my $p ($map{$f} || @pkg) {
 						#   calculate the actual file to be loaded thus avoid eval and
 						# checking $@ mannually.
-						do { require $p =~ s|::|/|gr . '.pm' };
+						my $r = do { $p =~ s|::|/|gr . '.pm' };
+						require $r if not $INC{$r};
 						if (my $r = *{"${p}::$f"}{CODE}) {
 							no warnings 'prototype';
 							*$q = $r;
@@ -74,17 +71,16 @@ BEGIN {
 				for my $p (@{+shift}) {
 					my $r = $p =~ s|::|/|gr . '.pm';
 					# ignore already loaded module.
-					next if $INC{$r};
-					*{"${p}::AUTOLOAD"} = sub {
+					my $f = "${p}::AUTOLOAD";
+					next if $INC{$r} or *$f{CODE};
+					*$f = sub {
 						my ($f) = do { our $AUTOLOAD =~ /.*::(.*)/ };
 						my $symtab = *{"${p}::"}{HASH};
 						delete $symtab->{AUTOLOAD};
 						require $r;
-						return &{$symtab->{$f}};
+						&{$symtab->{$f}};
 					};
 				}
-			} elsif ($q eq 'constant') {
-				*{$ns . $_} = \&$_ for keys %$c;
 			} elsif ($q eq 'sane') {
 				($^H, ${^WARNING_BITS}, %^H) = @H;
 			} else {
@@ -92,28 +88,21 @@ BEGIN {
 			}
 		}
 	};
-	for my $f (keys %$c) {
-		my $v = $c->{$f};
-		*$f = sub () {
-			$v;
+	my @a = qw/Cpanel::JSON::XS JSON::XS JSON::PP/;
+	App::rs->import(iautoload => ['Carp',
+				      [qw'Compress::Zlib memGunzip'],
+				      [qw'Socket getaddrinfo',
+				       map { "0$_" } qw'AF_UNIX SOCK_STREAM MSG_NOSIGNAL']],
+			oautoload => [@a]);
+	my $o;
+	for (@a) {
+		last if eval {
+			$o = $_->new->pretty->canonical;
 		};
 	}
+	sub json_unparse_readable	{ $o->encode(shift) }
+	sub json_parse			{ $o->decode(shift) }
 }
-{my @a = qw/Cpanel::JSON::XS JSON::XS JSON::PP/;
- App::rs->import(iautoload => ['Carp'],
-		 oautoload => [@a]);
- sub json_unparse_readable {
-	 state $o = do {
-		 my $o;
-		 for (@a) {
-			 last if eval {
-				 $o = $_->new->pretty->canonical;
-			 };
-		 }
-		 $o;
-	 };
-	 $o ? $o->encode(shift) : "what?!\n";
- }}
 sub xsh {
 	my $f = shift;
 	if (not ref $f) {
@@ -220,5 +209,245 @@ sub add {
 		my ($k, $v) = splice @_, 0, 2;
 		$h->{$k} = $v;
 	}
+}
+sub wf {
+	my $f = shift;
+	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
+	open my $fh, '>', $f or die "open $f for writing: $!";
+	if (@_)	{ syswrite $fh, shift }
+	else	{ $fh }
+}
+sub http_get {
+	state $x = {major => 1,
+		    minor => 1,
+		    type => 'request',
+		    method => 'GET',
+		    hf => [qw/Host User-Agent Accept-Encoding Connection/],
+		    hv => {connection => 'keep-alive',
+			   'user-agent' => 'App-rs',
+			   'accept-encoding' => 'gzip'}};
+	my $o = shift;
+	my $url = $o->{url};
+	@$x{qw/protocol request-uri/} = ('http', '/');
+	($x->{protocol}, $url) = ($1, $2) if $url =~ m|(.*)://(.*)|;
+	if ($url =~ m|(.*?)(/.*)|) {
+		($x->{hv}{host}, $x->{'request-uri'}) = ($1, $2);
+	} else {
+		$x->{hv}{host} = $url;
+	}
+	my $r = http_req($x);
+	die $r->{b} unless $r->{'status-code'} == 200;
+	$r->{c} = memGunzip($r->{c}) if eval {
+		$r->{hv}{'content-encoding'} eq 'gzip';
+	};
+	if ($o->{json}) {
+		json_parse($r->{c});
+	} elsif ($o->{save}) {
+		wf($o->{save}, $r->{c});
+	}
+}
+sub http_req {
+	# socket pool.
+	state $pool = {};
+	my ($x, $f) = @_;
+	# host key to identify socket.
+	my $hk = $x->{protocol} . '://' . $x->{hv}{host};
+	if (not $pool->{$hk}) {
+		say "creating new pool socket $hk.";
+		if ($x->{protocol} eq 'https')	{ $pool->{$hk} = connect_tls($x->{hv}{host}, 443) }
+		else				{ $pool->{$hk} = connect_tcp($x->{hv}{host}, 80) }
+	}
+	send $pool->{$hk}, http_unparse($x), MSG_NOSIGNAL;
+	my $h = http_parse_new();
+	# avoid undefined warning when checking length of $h->{c}.
+	$h->{c} = '';
+	while (1) {
+		my $b;
+		eval {
+			local $SIG{ALRM} = sub { die };
+			alarm 12;
+			recv $pool->{$hk}, $b, 1048576, 0;
+			alarm 0;
+		};
+		if ($@ or not $b) {
+			if ($@)	{ say 'timeout.' }
+			else	{ say 'remote-close.' }
+			my $_h = http_parse_new();
+			if ($f->{range} and length($h->{c})) {
+				$_h->{c} = $h->{c};
+				push @{$x->{hf}}, 'Range' if not exists $x->{hv}{range};
+				$x->{hv}{range} = 'bytes=' . length($h->{c}) . '-';
+			}
+			$h = $_h;
+			if ($x->{protocol} eq 'https')	{ $pool->{$hk} = connect_tls($x->{hv}{host}, 443) }
+			else				{ $pool->{$hk} = connect_tcp($x->{hv}{host}, 80) }
+			send $pool->{$hk}, http_unparse($x), MSG_NOSIGNAL;
+		} else {
+			return $h if http_parse($h, $b);
+		}
+	}
+}
+sub connect_tcp {
+	my ($err, $a) = getaddrinfo(@_);
+	die "getaddrinfo: $err" if $err;
+	socket my $fh, $a->{family}, SOCK_STREAM, 0 or die $!;
+	connect $fh, $a->{addr} or die $!;
+	$fh;
+}
+sub connect_tls {
+	my ($host, $port) = @_;
+	my ($p, $q);
+	socketpair $p, $q, AF_UNIX, SOCK_STREAM, 0;
+	xsh({asynchronous => 1}, qw/socat -/, "OPENSSL:$host:$port",
+	    {to => *STDIN,
+	     from => $q,
+	     mode => '<'}, {to => *STDOUT,
+			    from => $q,
+			    mode => '>'});
+	$p;
+}
+sub http_parse_new {
+	{st => 'reading-header',
+	 # remaining length.
+	 rl => 'line',
+	 # header value.
+	 hv => {},
+	 # header field.
+	 hf => [],
+	 # first line.
+	 fl => 1};
+}
+sub http_parse {
+	my ($h, $b) = @_;
+	$h->{b} .= $b;
+	my $i = 0;
+	while ($i < length($b)) {
+		if ($h->{rl} eq "line") {
+			pos($b) = $i;
+			if ($b =~ /\n/g) {
+				$h->{l} .= substr($b, $i, pos($b) - $i), $i = pos($b);
+				$h->{l} =~ s/\r?\n$//;
+				if ($h->{st} eq "reading-header") {
+					if ($h->{fl}) {
+						if ($h->{l}) {
+							if ($h->{l} =~ m|^HTTP\s*/\s*(\d)\s*\.\s*(\d)\s+(\d{3})\s+(.*)$|) {
+								@$h{qw/type major minor status-code reason-phrase/} = ("reply", $1, $2, $3, $4);
+							} elsif ($h->{l} =~ m|^(.*?)\s+(.*?)\s+HTTP\s*/\s*(\d)\s*\.\s*(\d)$|) {
+								@$h{qw/type method request-uri major minor/} = ("request", $1, $2, $3, $4);
+							} else {
+							}
+							$h->{fl} = 0;
+						}
+						# empty line before request/reply ignored.
+					} else {
+						if (not $h->{l}) {
+							if ($h->{type} eq "reply" and $h->{"status-code"} =~ /^(1\d{2}|204|304)$/) {
+								return $i;
+							} elsif (exists $h->{hv}{"transfer-encoding"} and $h->{hv}{"transfer-encoding"} !~ /^identity$/i) {
+								$h->{st} = "reading-chunk-size";
+							} elsif (exists $h->{hv}{"content-length"}) {
+								$h->{rl} = $h->{hv}{"content-length"}, $h->{st} = "reading-content";
+								# content-length could be 0.
+								return $i if not $h->{rl};
+							} elsif ($h->{type} eq "reply") {
+								$h->{rl} = "eof";
+							} else {
+								return $i;
+							}
+						} elsif ($h->{l} =~ /^\s/) {
+							my $k = lc $h->{hf}[$#{$h->{hf}}];
+							if (ref $h->{hv}{$k} eq "ARRAY") {
+								my $r = $h->{hv}{$k};
+								$r->[$#$r] .= $h->{l};
+							} else {
+								$h->{hv}{$k} .= $h->{l};
+							}
+						} else {
+							my ($f, $v) = $h->{l} =~ /^(.*?)\s*:\s*(.*?)\s*$/;
+							my $k = lc($f);
+							if (exists $h->{hv}{$k}) {
+								if (ref $h->{hv}{$k} eq "ARRAY") {
+									push @{$h->{hv}{$k}}, $v;
+								} else {
+									$h->{hv}{$k} = [$h->{hv}{$k}, $v];
+								}
+							} else {
+								$h->{hv}{$k} = $v;
+							}
+							push @{$h->{hf}}, $f;
+						}
+					}
+				} elsif ($h->{st} eq "reading-chunk-size") {
+					$h->{l} =~ /^([A-Fa-f0-9]+)/;
+					if ($1 !~ /^0+$/)	{ $h->{rl} = hex $1, $h->{st} = "reading-chunk-data" }
+					else			{ $h->{st} = "reading-trailer" }
+				} elsif ($h->{st} eq "reading-crlf") {
+					$h->{st} = "reading-chunk-size";
+				} elsif ($h->{st} eq "reading-trailer") {
+					# trailer ignored.
+					return $i unless $h->{l};
+				}
+				$h->{l} = "";
+			} else {
+				$h->{l} .= substr($b, $i), $i = length($b);
+			}
+		} else {
+			if ($h->{rl} ne "eof" and $h->{rl} <= length($b) - $i) {
+				$h->{c} .= substr($b, $i, $h->{rl}), $i += $h->{rl};
+				if ($h->{st} eq "reading-chunk-data")	{ $h->{rl} = "line", $h->{st} = "reading-crlf" }
+				else					{ return $i }
+			} else {
+				$h->{c} .= substr($b, $i), $h->{rl} -= length($b) - $i, $i = length($b);
+			}
+		}
+	}
+	undef;
+}
+sub http_unparse {
+	my $h = shift;
+	my $b;
+	my $v = "HTTP/$h->{major}.$h->{minor}";
+	if ($h->{type} eq "request")	{ $b = join " ", $h->{method}, $h->{"request-uri"}, $v }
+	else				{ $b = join " ", $v, $h->{"status-code"}, $h->{"reason-phrase"} }
+	$b .= "\r\n";
+	$h->{hv}{"content-length"} = length($h->{c}) if exists $h->{hv}{"content-length"};
+	my $i = {};
+	for (@{$h->{hf}}) {
+		$b .= "$_: ";
+		my $k = lc $_;
+		if (ref $h->{hv}{$k} eq "ARRAY")	{ $b .= $h->{hv}{$k}[$i->{$k}++] }
+		else					{ $b .= $h->{hv}{$k} }
+		$b .= "\r\n";
+	}
+	$b .= "\r\n";
+	if (exists $h->{c}) {
+		if (exists $h->{hv}{"transfer-encoding"} and $h->{hv}{"transfer-encoding"} !~ /^identity$/i) {
+			$b .= sprintf("%x\r\n", length($h->{c})) . $h->{c} . "\r\n0\r\n\r\n";
+		} else {
+			$b .= $h->{c};
+		}
+	}
+	$b;
+}
+sub vcmp ($$) {
+	my ($a, $b) = @_;
+	version->parse($a) <=> version->parse($b);
+}
+sub vsat {
+	my ($pkg, $ver) = @_;
+	return vcmp($^V, $ver) >= 0 if $pkg eq 'perl';
+	if (my $pid = fork) {
+		die unless $pid == waitpid $pid, 0;
+		not $?;
+	} else {
+		exit not eval {
+			require $pkg =~ s|::|/|gr . '.pm';
+			$pkg->VERSION($ver);
+		};
+	}
+}
+sub rf {
+	local (@ARGV, $/) = @_;
+	<>;
 }
 1;

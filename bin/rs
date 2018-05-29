@@ -17,11 +17,10 @@
 #   You should have received a copy of the GNU General Public License
 #   along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
-use App::rs 'sane', 'constant',
+use App::rs 'sane',
     iautoload => [qw/App::rs Term::ANSIColor Cwd/,
-		  ['List::Util', map { '0' . $_ } qw/reduce all/]];
-
-main();
+		  ['List::Util', map { "0$_" } qw/reduce all first/],
+		  ['Fcntl', map { "0$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/]];
 
 sub set {
 	my ($f, $m) = @_;
@@ -52,7 +51,7 @@ sub strip {
 		}
 	}
 }
-sub diff {
+sub _diff {
 	my ($cp, $vp) = @_;
 	my ($db, $v) = ($vp->{db}, {});
 	opendir(my $dh, $cp->{root} . $vp->{d}) or die $!;
@@ -81,9 +80,9 @@ sub diff {
 		if (%$st) {
 			if ($t == S_IFDIR) {
 				add(my $p = $db->{$_} ||= {c => {}}, %$m);
-				my $c = diff($cp, {db => $p->{c},
-						   ign => $vp->{ign}{$_},
-						   d => $r . '/'});
+				my $c = _diff($cp, {db => $p->{c},
+						    ign => $vp->{ign}{$_},
+						    d => $r . '/'});
 				if ($st->{ne} or %$c) {
 					$v->{$_} = {%$m,
 						    c => $c};
@@ -102,7 +101,7 @@ sub diff {
 	}
 	$v;
 }
-sub patch {
+sub _patch {
 	my ($cp, $vp) = @_;
 	my ($db, $v) = @$vp{qw/db v/};
 	for (sort keys %$v) {
@@ -117,9 +116,9 @@ sub patch {
 					     c => {}};
 			}
 			my $p = $db->{$_};
-			patch($cp, {v => $q->{c},
-				    db => $p->{c},
-				    d => $r . '/'});
+			_patch($cp, {v => $q->{c},
+				     db => $p->{c},
+				     d => $r . '/'});
 			set($f, $p) if not $p->{owner};
 			$p->{owner}{$cp->{oid}} = $cp->{ts};
 		} else {
@@ -209,13 +208,6 @@ sub rm {
 		}
 	}
 }
-sub wf {
-	my $f = shift;
-	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
-	open my $fh, '>', $f or die "open $f for writing: $!";
-	if (@_)	{ syswrite $fh, shift }
-	else	{ $fh }
-}
 sub runas {
 	my $u = shift;
 	if ($u ne 'root') {
@@ -227,7 +219,7 @@ sub runas {
 		($(, $)) = (0, '0 0');
 	}
 }
-sub crowded {
+sub _crowded {
 	{subr => sub {
 		my $o = shift;
 		if ($o->{event} eq 'ent') {
@@ -236,7 +228,7 @@ sub crowded {
 		}
 	 }, prophet => 0};
 }
-sub tag {
+sub _tag {
 	my $oid = shift;
 	{subr => sub {
 		my $o = shift;
@@ -246,7 +238,7 @@ sub tag {
 		}
 	 }, prophet => 1};
 }
-sub list {
+sub _list {
 	my $v = {};
 	{subr => sub {
 		my $o = shift;
@@ -297,190 +289,299 @@ sub rs_unparse_wrap {
 	rs_unparse(@$o{qw/v fd/});
 	say colored('done', 'green', 'bold'), '.';
 }
-sub main {
-	my $s;
-	do {
-		my $c = arg_parse();
-		$s = do($c->{profile} || "$ENV{HOME}/.rs.profile") || {};
-		add($s, %$c);
-		for ($s->{pool}, $s->{root})		{ s|(?<=[^/])$|/| if defined }
-		for ($s->{prefix} ||= $s->{root} )	{ s|/$|| if defined }
-	};
-	print 'run-time config: ', json_unparse_readable($s);
-	# mod tells us whether the database is modified.
-	my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
-	while (@ARGV) {
-		my $op = shift @ARGV;
-		if ($op eq 'diff') {
-			my $oid = shift @ARGV;
-			my ($p, $_v) = $s->{pool} . $oid . '.rs';
-			if (-e $p and not $s->{dry}) {
-				say "$p exists, will merge with newly generated patch tree.";
-				$_v = rs_parse($p);
-			}
-			my $v = diff({ih => {},
-				      root => $s->{root},
-				      oid => $oid,
-				      wet => !$s->{dry},
-				      ts => time}, {db => $db,
-						    ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
-						    d => ''});
-			if ($s->{dry}) {
-				push @ARGV, 'tag', $oid;
-			} else {
-				$mod = 1;
-				merge($v, $_v) if $_v;
-				rs_unparse_wrap({v => $v,
-						 fd => fileno wf($p),
-						 d => "compiled package $p"});
-			}
-		} elsif ($op eq 'patch') {
-			my $f = shift @ARGV;
-			#   v is the parsed value of the patch, and can be cut using subtree switch,
-			# the final patch to apply is stored in p.
-			my $v = my $p = rs_parse($f);
-			if (exists $s->{subtree}) {
-				$p = {};
-				grow($p, $v, $_) for flatten($s->{subtree});
-			}
-			my ($oid) = $f =~ m|([^/]*).rs$|;
-			patch({root => $s->{root},
-			       oid => $oid,
-			       ts => time}, {v => $p,
-					     db => $db,
-					     d => ''});
-			$mod = 1;
-		} elsif ($op eq 'remove') {
-			my $oid = shift @ARGV;
-			rm({root => $s->{root},
-			    oid => $oid,
-			    hard => !$s->{soft},
-			    pool => $s->{pool},
-			    patch => my $p = {}}, {db => $db,
-						   d => ''});
-			$mod = 1;
-			my $ts = time;
-			for (keys %$p) {
-				$s->{soft} and die;
-				patch({root => $s->{root},
-				       oid => $_,
-				       ts => $ts}, {v => $p->{$_}{p},
-						    db => $db,
-						    d => ''});
-			}
-		} elsif ($op eq 'compile') {
-			my $root;
-			if ($root = not $>) {
-				# drop root privilege before compile, as suggested by many packages.
-				my $u = $s->{'compile-as'} || $ENV{USER};
-				if ($u eq 'root') {
-					say colored('You are compiling as root!', 'red', 'bold');
-					$root = 0;
-				} else {
-					runas($u);
-				}
-			}
-			my ($p, $o, $oid, $pkg, $d) = (abs_path(shift @ARGV), getcwd());
-			chdir($s->{'compile-in'} || '.') or die $!;
-			if (-d $p) {
-				$oid = shift @ARGV;
-				if ($s->{prepared}) {
-					$d = $p;
-				} else {
-					mkdir $d = $oid or die $!;
-					xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
-					    $p, $d);
-				}
-			} else {
-				($oid) = $p =~ m|([^/]*).tar.\w+$|;
-				($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
-			}
-			($pkg) = $s->{package} || $oid =~ m|(.*)-|;
-			chdir $d or die "chdir $d: $!.";
-			my $b = do {
-				my ($b, $v) = (do $s->{build}, $pkg);
-				$b = $b->($s) if ref $b eq 'CODE';
-				$v = $b->{$v} until ref $v or not $v;
-				$v;
-			};
-			xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
-			unless ($b->{'no-configure'}) {
-				local %ENV = %ENV;
-				xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
-				my @p;
-				if ($s->{bootstrap}) {
-					$ENV{CPPFLAGS} = "-I$s->{prefix}/include" unless $b->{'no-cppflags'};
-					$ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . linker($s);
-				}
-				push @p, "--prefix=$s->{prefix}";
-				my $e = $b->{environment};
-				$ENV{$_} = $e->{$_} for keys %$e;
-				xsh(0, './configure', @{$b->{switch}}, @p,
-				    {to => *STDERR,
-				     from => *STDOUT,
-				     mode => '>'}, qw/| less --quit-on-intr --RAW-CONTROL-CHARS/) or die 'configure failed.';
-			}
-			xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
-			xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
-			xsh({'feed-stdin' => 1}, $b->{'post-make'}, 'bash') or die 'post-make failed.' if $b->{'post-make'};
-			# since the following is installation process we need to switch back to root.
-			runas('root') if $root;
-			xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.';
-			xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
-			# do some cleaning.
-			unless ($s->{prepared} or $s->{'no-rm'}) {
-				my $cwd = getcwd();
-				xsh(0, qw/rm -rf/, "../$d") if confirm "'rm -rf ../$d' on $cwd";
-			}
-			# return to where we started.
-			chdir $o or die "chdir $o: $!.";
-			# the next steps.
-			push @ARGV, 'diff', $oid, 'tag', $oid;
-		} elsif ($op =~ /^(tag|crowded|list|which)$/) {
-			no warnings 'once';
-			*which = sub {
-				my $r = shift;
-				if ($r =~ m{^/}) {
-					die colored("Absolute path $r not prefixed by $s->{root}", 'red', 'bold'), ".\n" unless 0 == index $r, $s->{root};
-					$r = substr $r, length $s->{root};
-				}
-				my ($d, @p) = (0, split m{/}, $r);
-				{subr => sub {
-					my $o = shift;
-					if ($o->{event} eq 'ent') {
-						my $u = $d >= @p || $o->{ent} eq $p[$d];
-						$d += 1 if $u and $o->{db}{c};
-						$u;
-					} elsif ($o->{event} eq 'ret') {
-						$d -= 1, 0;
-					}
-				 }, prophet => 1};
-			} if $op eq 'which';
-			my ($tab, $pid) = {tag => 1,
-					   crowded => 0,
-					   list => 0,
-					   which => 1};
-			local $SIG{PIPE} = 'IGNORE';
-			do {
-				pipe my $r, my $w or die $!;
-				$pid = xsh({asynchronous => 1},
-					   qw/less -R/, {to => *STDIN,
-							 from => $r,
-							 mode => '<'});
-				close $r;
-				print $w json_unparse_readable(filter({sink => $w,
-								       f => $::{$op}(splice @ARGV, 0, $tab->{$op})}, {db => $db,
-														      d => ''}));
-			};
-			# we must wait here or we will lose control-terminal.
-			waitpid $pid, 0;
-		}
+sub depdiff {
+	my ($p, $q) = @_;
+	my (%h, @l);
+	$h{$_->{module}} = 1 for @$q;
+	for (@$p) {
+		push @l, $_->{module} unless $h{$_->{module}};
 	}
-	if ($mod)	{ rs_unparse_wrap({v => $db,
-					   fd => fileno wf($s->{db}),
-					   d => "database $s->{db}"}) }
-	else		{ say colored('Database not touched', 'green'), '.' }
+	@l;
 }
+{ my $s;
+  { my $c = arg_parse();
+    $s = do($c->{profile} || "$ENV{HOME}/.rs.profile") || {};
+    add($s, %$c);
+    for ($s->{pool}, $s->{root})	{ s|(?<=[^/])$|/| if defined }
+    for ($s->{prefix} ||= $s->{root} )	{ s|/$|| if defined } }
+  print 'run-time config: ', json_unparse_readable($s);
+  sub modinfo {
+	  state $p = $s->{https} ? 'https' : 'http';
+	  my $pkg = shift =~ s/::/-/gr;
+	  http_get({url => "$p://fastapi.metacpan.org/v1/release/$pkg",
+		    json => 1});
+  }
+  # mod tells us whether the database is modified.
+  my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
+  sub diff {
+	  my $oid = shift;
+	  my ($p, $_v) = $s->{pool} . $oid . '.rs';
+	  if (-e $p and not $s->{dry}) {
+		  say "$p exists, will merge with newly generated patch tree.";
+		  $_v = rs_parse($p);
+	  }
+	  my $v = _diff({ih => {},
+			 root => $s->{root},
+			 oid => $oid,
+			 wet => !$s->{dry},
+			 ts => time}, {db => $db,
+				       ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
+				       d => ''});
+	  if ($s->{dry}) {
+		  tag($oid);
+	  } else {
+		  $mod = 1;
+		  merge($v, $_v) if $_v;
+		  rs_unparse_wrap({v => $v,
+				   fd => fileno wf($p),
+				   d => "compiled package $p"});
+	  }
+  }
+  sub patch {
+	  my $f = shift;
+	  #   v is the parsed value of the patch, and can be cut using subtree switch,
+	  # the final patch to apply is stored in p.
+	  my $v = my $p = rs_parse($f);
+	  if (exists $s->{subtree}) {
+		  $p = {};
+		  grow($p, $v, $_) for flatten($s->{subtree});
+	  }
+	  my ($oid) = $f =~ m|([^/]*).rs$|;
+	  _patch({root => $s->{root},
+		  oid => $oid,
+		  ts => time}, {v => $p,
+				db => $db,
+				d => ''});
+	  $mod = 1;
+  }
+  sub remove {
+	  my $oid = shift;
+	  rm({root => $s->{root},
+	      oid => $oid,
+	      hard => !$s->{soft},
+	      pool => $s->{pool},
+	      patch => my $p = {}}, {db => $db,
+				     d => ''});
+	  $mod = 1;
+	  my $ts = time;
+	  for (keys %$p) {
+		  $s->{soft} and die;
+		  _patch({root => $s->{root},
+			  oid => $_,
+			  ts => $ts}, {v => $p->{$_}{p},
+				       db => $db,
+				       d => ''});
+	  }
+  }
+  sub compile {
+	  my $root;
+	  if ($root = not $>) {
+		  # drop root privilege before compile, as suggested by many packages.
+		  my $u = $s->{'compile-as'} || $ENV{USER};
+		  if ($u eq 'root') {
+			  say colored('You are compiling as root!', 'red', 'bold');
+			  $root = 0;
+		  } else {
+			  runas($u);
+		  }
+	  }
+	  my ($p, $o, $oid, $pkg, $d) = (abs_path(shift), getcwd());
+	  chdir($s->{'compile-in'} || '.') or die $!;
+	  if (-d $p) {
+		  $oid = shift;
+		  if ($s->{prepared}) {
+			  $d = $p;
+		  } else {
+			  mkdir $d = $oid or die $!;
+			  xsh(0, qw/git clone --shared/, '--branch=' . ($s->{branch} || $oid),
+			      $p, $d);
+		  }
+	  } else {
+		  ($oid) = $p =~ m|([^/]*).tar.\w+$|;
+		  ($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
+	  }
+	  ($pkg) = $s->{package} || $oid =~ m|(.*)-|;
+	  chdir $d or die "chdir $d: $!.";
+	  my $b = do {
+		  if ($s->{cpan}) {
+			  {'no-configure' => 1,
+			   'post-configure' => "perl Makefile.PL INSTALL_BASE=$s->{prefix} NO_PERLLOCAL=1 NO_PACKLIST=1",
+			   'post-make' => 'make test'};
+		  } else {
+			  my ($b, $v) = (do $s->{build}, $pkg);
+			  $b = $b->($s) if ref $b eq 'CODE';
+			  $v = $b->{$v} until ref $v or not $v;
+			  $v;
+		  }
+	  };
+	  xsh({'feed-stdin' => 1}, $b->{'pre-configure'}, 'bash') or die 'pre-configure failed.' if $b->{'pre-configure'};
+	  unless ($b->{'no-configure'}) {
+		  local %ENV = %ENV;
+		  xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
+		  my @p;
+		  if ($s->{bootstrap}) {
+			  $ENV{CPPFLAGS} = "-I$s->{prefix}/include" unless $b->{'no-cppflags'};
+			  $ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . linker($s);
+		  }
+		  push @p, "--prefix=$s->{prefix}";
+		  my $e = $b->{environment};
+		  $ENV{$_} = $e->{$_} for keys %$e;
+		  xsh(0, './configure', @{$b->{switch}}, @p,
+		      {to => *STDERR,
+		       from => *STDOUT,
+		       mode => '>'}, qw/| less --quit-on-intr --RAW-CONTROL-CHARS/) or die 'configure failed.';
+	  }
+	  xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
+	  xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
+	  xsh({'feed-stdin' => 1}, $b->{'post-make'}, 'bash') or die 'post-make failed.' if $b->{'post-make'};
+	  # since the following is installation process we need to switch back to root.
+	  runas('root') if $root;
+	  xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.';
+	  xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
+	  # do some cleaning.
+	  unless ($s->{'no-rm'}) {
+		  my $cwd = getcwd();
+		  xsh(0, qw/rm -rf/, "../$d") if $s->{rm} or confirm "'rm -rf ../$d' on $cwd";
+	  }
+	  # return to where we started.
+	  chdir $o or die "chdir $o: $!.";
+	  # the next steps.
+	  diff($oid);
+	  tag($oid) unless $s->{cpan};
+  }
+  sub _which {
+	  my $r = shift;
+	  if ($r =~ m{^/}) {
+		  die colored("Absolute path $r not prefixed by $s->{root}", 'red', 'bold'), ".\n" unless 0 == index $r, $s->{root};
+		  $r = substr $r, length $s->{root};
+	  }
+	  my ($d, @p) = (0, split m{/}, $r);
+	  {subr => sub {
+		  my $o = shift;
+		  if ($o->{event} eq 'ent') {
+			  my $u = $d >= @p || $o->{ent} eq $p[$d];
+			  $d += 1 if $u and $o->{db}{c};
+			  $u;
+		  } elsif ($o->{event} eq 'ret') {
+			  $d -= 1, 0;
+		  }
+	   }, prophet => 1};
+  }
+  for my $f (qw/tag crowded list which/) {
+	  no strict 'refs';
+	  *$f = sub {
+		  my $pid;
+		  local $SIG{PIPE} = 'IGNORE';
+		  do {
+			  pipe my $r, my $w or die $!;
+			  $pid = xsh({asynchronous => 1},
+				     qw/less -R/, {to => *STDIN,
+						   from => $r,
+						   mode => '<'});
+			  close $r;
+			  print $w json_unparse_readable(filter({sink => $w,
+								 f => &{$::{"_$f"}}}, {db => $db,
+										       d => ''}));
+		  };
+		  # we must wait here or we will lose control-terminal.
+		  waitpid $pid, 0;
+	  };
+  }
+  { my $refdb;
+    sub _ref_init () { $refdb = -f $s->{refdb} ? json_parse(rf($s->{refdb})) : {} }
+    sub _ref_save () { wf($s->{refdb}, json_unparse_readable($refdb)) }
+    sub _install {
+	    my $o = shift;
+	    print "Satisfying: ", json_unparse_readable($o);
+	    unless ($o->{phase} =~ /^(configure|build|test|runtime)$/ and
+		    $o->{relationship} eq 'requires') {
+		    say colored("Dependency of phase $o->{phase} or relationship $o->{relationship} not installed by default.", 'yellow');
+		    return;
+	    }
+	    my $q = $refdb->{$o->{module}} ||= {};
+	    my ($A, $L) = ($q->{current},
+			   $s->{latest} || $o->{version} eq 'latest');
+	    if ($A)	{ return if not $L and vcmp($A->{version}, $o->{version}) >= 0 }
+	    # no update on CORE module even when latest is required.
+	    else	{ return if vsat(@$o{qw/module version/}) }
+	    my ($t, $B, $j) = first {
+		    vcmp($_->{version}, $o->{version}) >= 0
+	    } @{$q->{available} ||= []};
+	    if (not $L and $t) {
+		    $B = $t;
+		    print "Available: ", json_unparse_readable($B);
+	    } else {
+		    say 'Getting module info from metacpan...';
+		    $j = modinfo($o->{module});
+		    say "Latest version: $j->{version}.";
+		    return if $A and $A->{version} eq $j->{version};
+		    $q->{dependency}{$j->{version}} = $j->{dependency};
+		    $B = {name => $j->{name},
+			  version => $j->{version}};
+	    }
+	    my $D = $q->{dependency}{$B->{version}};
+	    _install($_) for @$D;
+	    if ($A) {
+		    remove($A->{name});
+		    _uninstall({to => $_,
+				from => $o->{module}}) for depdiff($q->{dependency}{$A->{version}},
+								   $D);
+	    }
+	    my $f = "$s->{pool}$B->{name}.rs";
+	    if (-f $f) {
+		    patch($f);
+	    } else {
+		    say "Downloading $j->{download_url} @ $j->{date}...";
+		    http_get({url => $j->{download_url},
+			      save => $f = "$s->{'compile-in'}/$j->{archive}"});
+		    compile($f);
+		    unshift @{$q->{available}}, $B;
+	    }
+	    $q->{current} = $B;
+	    $refdb->{$_->{module}}{referent}{$o->{module}} = $_->{version} for @$D;
+    }
+    sub install {
+	    _ref_init;
+	    @$s{qw/cpan rm/} = (1, 1), $s->{version} ||= 0;
+	    _install({module => my $module = shift,
+		      version => $s->{version},
+		      phase => 'runtime',
+		      relationship => 'requires'});
+	    $refdb->{$module}{direct} = 1;
+	    _ref_save;
+    }
+    sub _uninstall {
+	    my $o = shift;
+	    my $q = $refdb->{$o->{to}};
+	    delete $q->{referent}{$o->{from}};
+	    return unless $q->{current};
+	    unless (%{$q->{referent}} or $q->{direct}) {
+		    for (@{$q->{dependency}{$q->{current}{version}}}) {
+			    _uninstall({to => $_->{module},
+					from => $o->{to}});
+		    }
+		    remove($q->{current}{name});
+		    delete $q->{current};
+	    }
+    }
+    sub uninstall {
+	    _ref_init;
+	    my $q = $refdb->{my $module = shift};
+	    die colored("$module not installed or directly referenced by you.", qw/bold red/),
+		unless $q->{current} and $q->{direct};
+	    delete $q->{direct};
+	    _uninstall({to => $module,
+			from => ''});
+	    _ref_save;
+    } }
+  { my $cmd = shift;
+    $::{$cmd}(@ARGV) }
+  if ($mod)	{ rs_unparse_wrap({v => $db,
+				   fd => fileno wf($s->{db}),
+				   d => "database $s->{db}"}) }
+  else		{ say colored('Database not touched', 'green'), '.' } }
+
+__END__
 
 =head1 NAME
 
