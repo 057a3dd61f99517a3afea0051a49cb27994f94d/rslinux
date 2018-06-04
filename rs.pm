@@ -100,8 +100,8 @@ BEGIN {
 			$o = $_->new->pretty->canonical;
 		};
 	}
-	sub json_unparse_readable	{ $o->encode(shift) }
-	sub json_parse			{ $o->decode(shift) }
+	sub jw	{ $o->encode(shift) }
+	sub jr	{ $o->decode(shift) }
 }
 sub xsh {
 	my $f = shift;
@@ -241,7 +241,7 @@ sub http_get {
 		$r->{hv}{'content-encoding'} eq 'gzip';
 	};
 	if ($o->{json}) {
-		json_parse($r->{c});
+		jr($r->{c});
 	} elsif ($o->{save}) {
 		wf($o->{save}, $r->{c});
 	}
