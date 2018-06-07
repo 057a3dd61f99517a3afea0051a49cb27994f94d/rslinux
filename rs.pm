@@ -210,6 +210,10 @@ sub add {
 		$h->{$k} = $v;
 	}
 }
+sub slice {
+	my $h = shift;
+	map { $_ => $h->{$_} } @_;
+}
 sub wf {
 	my $f = shift;
 	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
@@ -217,16 +221,23 @@ sub wf {
 	if (@_)	{ syswrite $fh, shift }
 	else	{ $fh }
 }
-sub http_get {
-	state $x = {major => 1,
-		    minor => 1,
-		    type => 'request',
-		    method => 'GET',
-		    hf => [qw/Host User-Agent Accept-Encoding Connection/],
-		    hv => {connection => 'keep-alive',
-			   'user-agent' => 'App-rs',
-			   'accept-encoding' => 'gzip'}};
+sub http_req {
 	my $o = shift;
+	my $x = {major => 1,
+		 minor => 1,
+		 type => 'request',
+		 method => $o->{method},
+		 hf => [qw/Host User-Agent Accept-Encoding Connection/],
+		 hv => {connection => 'keep-alive',
+			'user-agent' => 'App-rs',
+			'accept-encoding' => 'gzip'}};
+	if ($o->{method} eq 'POST') {
+		push @{$x->{hf}}, qw/Content-Length Content-Type/;
+		add($x->{hv},
+		    'content-length' => undef,
+		    'content-type' => 'application/x-www-form-urlencoded');
+		$x->{c} = $o->{'post-data'};
+	}
 	my $url = $o->{url};
 	@$x{qw/protocol request-uri/} = ('http', '/');
 	($x->{protocol}, $url) = ($1, $2) if $url =~ m|(.*)://(.*)|;
@@ -235,18 +246,16 @@ sub http_get {
 	} else {
 		$x->{hv}{host} = $url;
 	}
-	my $r = http_req($x);
-	die $r->{b} unless $r->{'status-code'} == 200;
-	$r->{c} = memGunzip($r->{c}) if eval {
-		$r->{hv}{'content-encoding'} eq 'gzip';
-	};
+	my $r = _http_req($x);
+	$r->{c} = memGunzip($r->{c}) if eval { $r->{hv}{'content-encoding'} eq 'gzip' };
 	if ($o->{json}) {
 		jr($r->{c});
 	} elsif ($o->{save}) {
+		die $r->{b} unless $r->{'status-code'} == 200;
 		wf($o->{save}, $r->{c});
 	}
 }
-sub http_req {
+sub _http_req {
 	# socket pool.
 	state $pool = {};
 	my ($x, $f) = @_;
