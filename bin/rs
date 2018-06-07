@@ -291,12 +291,19 @@ sub rs_unparse_wrap {
 }
 sub depdiff {
 	my ($p, $q) = @_;
-	my (%h, @l);
-	$h{$_->{module}} = 1 for @$q;
-	for (@$p) {
-		push @l, $_->{module} unless $h{$_->{module}};
-	}
-	@l;
+	my %h = map { $_->{module} => 1 } @$q;
+	grep { not $h{$_} } map { $_->{module} } @$p;
+}
+sub depF {
+	my $o = shift;
+	return 1 if $o->{phase} =~ /^(configure|build|test|runtime)$/ and $o->{relationship} eq 'requires';
+	say colored(['yellow'], 'Dependency: ', jw($o), 'not installed by default.');
+	0;
+}
+sub Nrev {
+	my $n = shift;
+	$n =~ s/-/::/g or $n =~ s/::/-/g;
+	$n;
 }
 { my $s;
   { my $c = arg_parse();
@@ -305,12 +312,19 @@ sub depdiff {
     for ($s->{pool}, $s->{root})	{ s|(?<=[^/])$|/| if defined }
     for ($s->{prefix} ||= $s->{root} )	{ s|/$|| if defined } }
   print 'run-time config: ', jw($s);
-  sub modinfo {
-	  state $p = $s->{https} ? 'https' : 'http';
-	  my $pkg = shift =~ s/::/-/gr;
-	  http_get({url => "$p://fastapi.metacpan.org/v1/release/$pkg",
-		    json => 1});
-  }
+  { my $p = $s->{https} ? 'https' : 'http';
+    sub Rmodinfo {
+	    http_req({method => 'GET',
+		      json => 1,
+		      url => "$p://fastapi.metacpan.org/v1/release/" . Nrev(shift)});
+    }
+    sub Vmodinfo {
+	    http_req({method => 'POST',
+		      json => 1,
+		      url => "$p://fastapi.metacpan.org/v1/release/_search",
+		      'post-data' => jw({query => {term => {provides => shift}},
+					 filter => {term => {status => 'latest'}}})});
+    } }
   # mod tells us whether the database is modified.
   my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
   sub diff {
@@ -485,17 +499,15 @@ sub depdiff {
 	  *$f = sub {
 		  my $pid;
 		  local $SIG{PIPE} = 'IGNORE';
-		  do {
-			  pipe my $r, my $w or die $!;
-			  $pid = xsh({asynchronous => 1},
-				     qw/less -R/, {to => *STDIN,
-						   from => $r,
-						   mode => '<'});
-			  close $r;
-			  print $w jw(filter({sink => $w,
-					      f => &{$::{"_$f"}}}, {db => $db,
-								    d => ''}));
-		  };
+		  { pipe my $r, my $w or die $!;
+		    $pid = xsh({asynchronous => 1},
+			       qw/less -R/, {to => *STDIN,
+					     from => $r,
+					     mode => '<'});
+		    close $r;
+		    print $w jw(filter({sink => $w,
+					f => &{$::{"_$f"}}}, {db => $db,
+							      d => ''})) }
 		  # we must wait here or we will lose control-terminal.
 		  waitpid $pid, 0;
 	  };
@@ -506,18 +518,13 @@ sub depdiff {
     sub _install {
 	    my $o = shift;
 	    print "Satisfying: ", jw($o);
-	    unless ($o->{phase} =~ /^(configure|build|test|runtime)$/ and
-		    $o->{relationship} eq 'requires') {
-		    say colored("Dependency of phase $o->{phase} or relationship $o->{relationship} not installed by default.", 'yellow');
-		    return;
-	    }
 	    my $q = $refdb->{$o->{module}} ||= {};
 	    my ($A, $L) = ($q->{current},
 			   $s->{latest} || $o->{version} eq 'latest');
 	    if ($A)	{ return if not $L and vcmp($A->{version}, $o->{version}) >= 0 }
 	    # no update on CORE module even when latest is required.
 	    else	{ return if vsat(@$o{qw/module version/}) }
-	    my ($t, $B, $j) = first {
+	    my ($t, $B, $j, $V) = first {
 		    vcmp($_->{version}, $o->{version}) >= 0
 	    } @{$q->{available} ||= []};
 	    if (not $L and $t) {
@@ -525,12 +532,24 @@ sub depdiff {
 		    print "Available: ", jw($B);
 	    } else {
 		    say 'Getting module info from metacpan...';
-		    $j = modinfo($o->{module});
+		    $j = Rmodinfo($o->{module});
+		    if (eval { $j->{code} == 404 }) {
+			    $j = Vmodinfo($o->{module});
+			    die jw($j) unless $j->{hits}{total} == 1;
+			    my $k = $j->{hits}{hits}[0]{_source};
+			    say colored("Using $k->{name} for $o->{module}.", qw/bold yellow/);
+			    my $v = $k->{version};
+			    $j = {name => Nrev($o->{module}) . "-$v",
+				  version => $v,
+				  dependency => [{module => Nrev($k->{distribution}),
+						  version => $v,
+						  slice($o, qw/phase relationship/)}]};
+			    $V = 1;
+		    }
 		    say "Latest version: $j->{version}.";
 		    return if $A and $A->{version} eq $j->{version};
-		    $q->{dependency}{$j->{version}} = $j->{dependency};
-		    $B = {name => $j->{name},
-			  version => $j->{version}};
+		    $q->{dependency}{$j->{version}} = [grep { depF($_) } @{$j->{dependency}}];
+		    $B = {slice($j, qw/name version/)};
 	    }
 	    my $D = $q->{dependency}{$B->{version}};
 	    _install($_) for @$D;
@@ -540,13 +559,19 @@ sub depdiff {
 				from => $o->{module}}) for depdiff($q->{dependency}{$A->{version}},
 								   $D);
 	    }
-	    my $f = "$s->{pool}$B->{name}.rs";
-	    if (-f $f) {
+	    if (-f(my $f = "$s->{pool}$B->{name}.rs")) {
+		    say colored("Reusing compiled package $f.", qw/bold yellow/);
 		    patch($f);
-	    } else {
-		    say "Downloading $j->{download_url} @ $j->{date}...";
-		    http_get({url => $j->{download_url},
-			      save => $f = "$s->{'compile-in'}/$j->{archive}"});
+	    } elsif (not $V) {
+		    if (-f($f = "$s->{'compile-in'}/$j->{archive}")) {
+			    say colored("Reusing source archive $f.", qw/bold yellow/);
+		    } else {
+			    $j->{download_url} =~ s|(?<=^http)s(?=://)|| unless $s->{https};
+			    say "Downloading $j->{download_url} @ $j->{date}...";
+			    http_req({method => 'GET',
+				      url => $j->{download_url},
+				      save => $f});
+		    }
 		    compile($f);
 		    unshift @{$q->{available}}, $B;
 	    }
@@ -586,6 +611,11 @@ sub depdiff {
 	    _uninstall({to => $module,
 			from => ''});
 	    _ref_save;
+    }
+    sub direct {
+	    _ref_init;
+	    print jw([map { [$_, $refdb->{$_}{current}{version}] }
+		      grep { $refdb->{$_}{direct} } keys %$refdb]);
     } }
   { my $cmd = shift;
     $::{$cmd}(@ARGV) }
