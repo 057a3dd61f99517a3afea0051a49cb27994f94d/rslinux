@@ -630,7 +630,7 @@ __END__
 
 =head1 NAME
 
-App::rs - The package manager for RSLinux
+App::rs - The package manager for RSLinux and the first reference counting CPAN client
 
 =head1 SYNOPSIS
 
@@ -660,7 +660,20 @@ App::rs - The package manager for RSLinux
     # find places where multiple packages tried to install
     rs crowded
 
+    # install CPAN module A::B::C recursively (i.e. including dependency)
+    rs install A::B::C
+
+    # uninstall CPAN module A::B::C recursively (i.e. including dependency)
+    rs uninstall A::B::C
+
+    # print a list of installed modules directly from you (i.e. not dependency)
+    rs direct
+
 =head1 DESCRIPTION
+
+(Please see the section L</CPAN> and
+L<my TPF proposal|https://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux/blob/rs/TPF-proposal.pod>
+for my ongoing effort to marry C<App::rs> and CPAN.)
 
 RSLinux was born out of desire for freedom. Back in 2012, I was using
 ArchLinux, as with many distributions at that time, it's switching to
@@ -863,6 +876,21 @@ Used with C<remove>, such that no file/directory will be removed, but
 the entries in the database will be removed as usual, it's used to
 do arbitrary L<amending|/AMEND>.
 
+=item * --refdb=<file>
+
+The database that connects all the packages together, it's the core data structure
+used for managing CPAN modules. Currently it uses JSON as its format.
+
+=item * --latest
+
+This option applies to the C<install> command, so that it will check the
+CPAN module to be installed and all its recursive dependency for updating.
+
+=item * --version=<version>
+
+Specify the minimum version requirement for the CPAN module to be installed so that it will
+be updated if it's already installed but failed to satisfy the requirement.
+
 =back
 
 Note that all options should be specified before any command.
@@ -999,6 +1027,27 @@ Print a full list of installed packages, sorted from the most recent to the leas
 Find out the crowded places, where more than one package likes to reside, that's
 useful if you want a file from a specific package, and also to discover
 accidental overwrite.
+
+=item install
+
+C<install> accepts the name of a CPAN module (A::B::C) as parameter and installs
+this module and all its recursive dependency. No installation will be done if this
+module is already installed, but the C<direct> flag will always be set
+in the database.
+
+=item uninstall
+
+C<uninstall> takes one argument, the name of the module to be uninstalled,
+it must be directly installed by you, i.e. not only as a dependency pulled
+in, if it's still being referenced by another module no uninstallation
+will be done, but the C<direct> flag will still be cleared in the
+database, otherwise this module will be removed along with its dependency,
+potentially its dependency's dependency, etc.
+
+=item direct
+
+Print a list of modules that're directly installed by you, in comparison to
+the C<list> command where every installed module will be printed.
 
 =back
 
@@ -1396,6 +1445,9 @@ You can also contribute by hiring me or help getting me hired,
 if you find me appropriate for a job, a stable living for the author
 is surely inevitable for a healthy project.
 
+Support me during the TPF granting process, it will find me the necessary
+time and resource to work on C<App::rs> and make it better.
+
 =head1 VM image
 
 A VM image to be used with C<qemu> in raw format is released on
@@ -1457,6 +1509,53 @@ The executable will reside in the C<bin> direcory under prefix and the Perl
 modules will be in C<lib/perl5/x86_64-linux>, the C<x86_64-linux> part will
 be different if you're using a architecture other than C<x86_64>. Adjust your
 PATH and PERLLIB accordingly.
+
+Note that since C<App::rs> is used to bootstrap both RSLinux and CPAN, it's
+explicitly designed to have no dependency other than the core Perl modules.
+
+=head1 CPAN
+
+I recently extended C<App::rs> to be the first reference counting CPAN client,
+the only configuration file added is the reference counting database, here's a
+minimal configuration that works so that you could try it out:
+
+	my $H = $ENV{HOME};
+	# database about files in the root directory.
+	{db => "$H/rs-meta/db.rs",
+	 # directory into which CPAN modules should be installed.
+	 root => "$H/rs-cpan/",
+	 # directory to store compiled binary packages.
+	 pool => "$H/rs-meta/pool/",
+	 # database about CPAN modules.
+	 refdb => "$H/rs-meta/refdb.json"}
+
+Modules will be installed into the C<rs-cpan> directory under your home, and
+C<rs-meta> will be used to store metadata about those installed modules. Compilation
+will happen under the current directory, the build directory of individual module
+will be removed automatically, but the downloaded source tarballs will be preserved
+since they may be useful for futher reference. As you can see all those options
+could be customized, if you want to do customization reading the full mannual is
+highly suggested, it will be worth your while.
+
+Now you can save the configuration as C<.rs.profile> under your home directory, then
+add the path C<< <HOME>/rs-cpan/lib/perl5 >> and
+C<< <HOME>/rs-cpan/lib/perl5/x86_64-linux >> to your C<PERLLIB> environment (the
+x86_64-linux part will be different depending on your OS and architecture), after
+that it's all setup:
+
+    # CPAN module A::B::C will be installed along with all its dependency.
+    $ rs install A::B::C
+
+    # CPAN module A::B::C will be uninstalled along with all its dependency,
+    # so that the rs-cpan directory will be completely empty.
+    $ rs uninstall A::B::C
+
+    # CPAN module A::B::C will be immediately restored from the binary packages
+    # generated during the first install.
+    $ rs install A::B::C
+
+Please see my TPF proposal for more information on the current state, plans,
+caveats, etc., I will merge it back here once the granting process finishes.
 
 =head1 LICENSE
 

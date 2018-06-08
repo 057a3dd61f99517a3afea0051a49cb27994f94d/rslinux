@@ -23,7 +23,7 @@ Devel::PPPort::WriteFile();
 use ExtUtils::MakeMaker;
 my $me = '://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux';
 WriteMakefile(NAME => 'App::rs',
-	      ABSTRACT => 'package manager of RSLinux',
+	      ABSTRACT_FROM => 'bin/rs',
 	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
 	      EXE_FILES => ['bin/rs'],
 	      MAN3PODS => {},
