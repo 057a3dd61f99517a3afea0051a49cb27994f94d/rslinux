@@ -19,6 +19,7 @@
 
 use App::rs 'sane',
     iautoload => [qw/App::rs Term::ANSIColor Cwd/,
+		  [qw/File::Path make_path/],
 		  ['List::Util', map { "0$_" } qw/reduce all first/],
 		  ['Fcntl', map { "0$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/]];
 
@@ -309,8 +310,9 @@ sub Nrev {
   { my $c = arg_parse();
     $s = do($c->{profile} || "$ENV{HOME}/.rs.profile") || {};
     add($s, %$c);
-    for ($s->{pool}, $s->{root})	{ s|(?<=[^/])$|/| if defined }
-    for ($s->{prefix} ||= $s->{root} )	{ s|/$|| if defined } }
+    eval { s|(?<=[^/])$|/| }	for $s->{pool}, $s->{root};
+    eval { s|/$|| }		for $s->{prefix} ||= $s->{root};
+    $s->{'compile-in'} ||= '.' }
   print 'run-time config: ', jw($s);
   { my $p = $s->{https} ? 'https' : 'http';
     sub Rmodinfo {
@@ -329,7 +331,7 @@ sub Nrev {
   my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
   sub diff {
 	  my $oid = shift;
-	  mkdir $s->{pool} or die $! unless -d $s->{pool};
+	  make_path($s->{pool}) unless -d $s->{pool};
 	  my ($p, $_v) = $s->{pool} . $oid . '.rs';
 	  if (-e $p and not $s->{dry}) {
 		  say "$p exists, will merge with newly generated patch tree.";

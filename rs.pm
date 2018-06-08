@@ -91,6 +91,7 @@ BEGIN {
 	my @a = qw/Cpanel::JSON::XS JSON::XS JSON::PP/;
 	App::rs->import(iautoload => ['Carp',
 				      [qw'Compress::Zlib memGunzip'],
+				      [qw/File::Path make_path/],
 				      [qw'Socket getaddrinfo',
 				       map { "0$_" } qw'AF_UNIX SOCK_STREAM MSG_NOSIGNAL']],
 			oautoload => [@a]);
@@ -215,9 +216,10 @@ sub slice {
 	map { $_ => $h->{$_} } @_;
 }
 sub wf {
-	my $f = shift;
-	unlink $f or die "$!: unable to remove $f for writing.\n" if -e $f;
-	open my $fh, '>', $f or die "open $f for writing: $!";
+	local $_ = shift;
+	if (-e)			{ unlink or die "$!: unable to remove $_ for writing.\n" }
+	elsif (m|(.*/)|)	{ make_path($1) unless -d }
+	open my $fh, '>', $_ or die "open $_ for writing: $!";
 	if (@_)	{ syswrite $fh, shift }
 	else	{ $fh }
 }
