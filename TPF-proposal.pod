@@ -37,14 +37,14 @@ makes C<App::rs> a beneficial and worth doing project, since it enables one to
 fully explore CPAN without any hesitation, you will never have to worry about
 how to remove a module along with its dependency it pulled in; never be afraid to upgrade
 a module to a new version since you always have the option to downgrade to a
-previous version from a binary package instantly; never feel that the inside the
+previous version from a binary package instantly; never feel that inside the
 perl module directory there lies a whole mess since each file is tracked, you know
 exactly to which module a file belongs, why a module is installed, and whether
 and when it will be gone.
 
 In addition to that, you can also upgrade a module including its dependency
-recursively, transfer the reference counting database and the package pool to
-another machine and have a fully controllable Perl library with no effort.
+recursively, transfer the reference counting database and the binary package pool to
+another machine and have a fully controllable Perl library restored with no effort.
 
 In summary, C<App::rs> is worth it by making the best of Perl even better.
 

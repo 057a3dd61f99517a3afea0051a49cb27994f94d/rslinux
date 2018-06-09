@@ -18,16 +18,18 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
+require v5.14;
 require Devel::PPPort;
 Devel::PPPort::WriteFile();
-use ExtUtils::MakeMaker;
+require ExtUtils::MakeMaker;
+*WriteMakefile = \&ExtUtils::MakeMaker::WriteMakefile;
 my $me = '://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux';
 WriteMakefile(NAME => 'App::rs',
 	      ABSTRACT_FROM => 'bin/rs',
 	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
 	      EXE_FILES => ['bin/rs'],
 	      MAN3PODS => {},
-	      VERSION => v1.01.001,
+	      VERSION_FROM => 'rs.pm',
 	      META_MERGE => {resources => {repository => {type => 'git',
 							  url => "git$me.git",
 							  web => "https$me"},

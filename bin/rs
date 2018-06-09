@@ -24,7 +24,7 @@ use App::rs 'sane',
 		  ['Fcntl', map { "0$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/]];
 
 BEGIN {
-	for my $c (qw/green yellow magenta red/) {
+	for my $c (qw/green cyan yellow magenta red/) {
 		no strict 'refs';
 		my $f = uc substr $c, 0, 1;
 		*$f = sub () { [$c] };
@@ -315,12 +315,18 @@ sub Nrev {
 	$n;
 }
 { my $s;
-  { my $c = arg_parse();
-    $s = do($c->{profile} || "$ENV{HOME}/.rs.profile") || {};
-    add($s, %$c);
-    eval { s|(?<=[^/])$|/| }	for $s->{pool}, $s->{root};
-    eval { s|/$|| }		for $s->{prefix} ||= $s->{root};
-    $s->{'compile-in'} ||= '.' }
+  { my $H = $ENV{HOME};
+    my $P = "$H/.rs";
+    $s = {db => "$P/db.rs",
+	  root => "$H/CPAN/",
+	  pool => "$P/pool/",
+	  refdb => "$P/refdb.json",
+	  'compile-in' => '.'};
+    my $cmdline = arg_parse();
+    my $profile = do($cmdline->{profile} || "$H/.rs.profile") || {};
+    add($s, %$profile, %$cmdline);
+    s|(?<=[^/])$|/|	for $s->{pool}, $s->{root};
+    s|/$||		for $s->{prefix} ||= $s->{root} }
   print 'run-time config: ', jw($s);
   { my $p = $s->{https} ? 'https' : 'http';
     sub Rmodinfo {
@@ -411,7 +417,7 @@ sub Nrev {
 		  }
 	  }
 	  my ($p, $o, $oid, $pkg, $d) = (abs_path(shift), getcwd());
-	  chdir($s->{'compile-in'} || '.') or die $!;
+	  chdir $s->{'compile-in'} or die $!;
 	  if (-d $p) {
 		  $oid = shift;
 		  if ($s->{prepared}) {
@@ -588,16 +594,31 @@ sub Nrev {
 	    $q->{current} = $B;
 	    $refdb->{$_->{module}}{referent}{$o->{module}} = $_->{version} for @$D;
     }
-    sub install {
-	    _RR;
-	    @$s{qw/cpan rm/} = (1, 1), $s->{version} ||= 0;
-	    _install({module => my $module = shift,
-		      version => $s->{version},
-		      phase => 'runtime',
-		      relationship => 'requires'});
-	    $refdb->{$module}{direct} = 1;
-	    _RW;
-    }
+    { my $l;
+      sub _lib () {
+	      my (@p, @q) = split ':', $ENV{PERLLIB} || '';
+	      my %h = map { s|/$||r => 1 } @p;
+	      my $b = "$s->{prefix}/lib/perl5";
+	      require Config;
+	      no warnings 'once';
+	      if (@q = grep { not $h{$_} } $b, "$b/$Config::Config{archname}") {
+		      $ENV{PERLLIB} = $l = join ':', @p, @q;
+		      say 'PERLLIB set to: ', colored(YY, $l), '.';
+	      }
+      }
+      sub install {
+	      _RR;
+	      _lib;
+	      @$s{qw/cpan rm/} = (1, 1), $s->{version} ||= 0;
+	      _install({module => my $module = shift,
+			version => $s->{version},
+			phase => 'runtime',
+			relationship => 'requires'});
+	      $refdb->{$module}{direct} = 1;
+	      _RW;
+	      say 'Please set your PERLLIB environment to ',
+		  colored(CC, $l), ' to use the installed modules.' if $l;
+      } }
     sub _uninstall {
 	    my $o = shift;
 	    my $q = $refdb->{$o->{to}};
@@ -702,6 +723,12 @@ App::rs - The package manager for RSLinux and the first reference counting CPAN 
 
     # print a list of installed modules directly from you (i.e. not dependency)
     rs direct
+
+    # show a list of modules that are orphaned (i.e. not referenced by anybody)
+    rs orphan
+
+    # adopt all the orphans and you will never be able to see them again.
+    rs adopt
 
 =head1 DESCRIPTION
 
@@ -1061,27 +1088,6 @@ Print a full list of installed packages, sorted from the most recent to the leas
 Find out the crowded places, where more than one package likes to reside, that's
 useful if you want a file from a specific package, and also to discover
 accidental overwrite.
-
-=item install
-
-C<install> accepts the name of a CPAN module (A::B::C) as parameter and installs
-this module and all its recursive dependency. No installation will be done if this
-module is already installed, but the C<direct> flag will always be set
-in the database.
-
-=item uninstall
-
-C<uninstall> takes one argument, the name of the module to be uninstalled,
-it must be directly installed by you, i.e. not only as a dependency pulled
-in, if it's still being referenced by another module no uninstallation
-will be done, but the C<direct> flag will still be cleared in the
-database, otherwise this module will be removed along with its dependency,
-potentially its dependency's dependency, etc.
-
-=item direct
-
-Print a list of modules that're directly installed by you, in comparison to
-the C<list> command where every installed module will be printed.
 
 =back
 
@@ -1550,32 +1556,25 @@ explicitly designed to have no dependency other than the core Perl modules.
 =head1 CPAN
 
 I recently extended C<App::rs> to be the first reference counting CPAN client,
-the only configuration file added is the reference counting database, here's a
-minimal configuration that works so that you could try it out:
+by adding a reference counting database to connect each package together.
 
-	my $H = $ENV{HOME};
-	# database about files in the root directory.
-	{db => "$H/rs-meta/db.rs",
-	 # directory into which CPAN modules should be installed.
-	 root => "$H/rs-cpan/",
-	 # directory to store compiled binary packages.
-	 pool => "$H/rs-meta/pool/",
-	 # database about CPAN modules.
-	 refdb => "$H/rs-meta/refdb.json"}
+By default, modules will be installed into the C<CPAN> directory under
+your home, and C<.rs> directory will be used to store metadata about those
+installed modules. Compilation will happen under the current directory,
+the build directory of individual module will be removed automatically,
+but the downloaded source tarballs will be preserved since they may be
+useful for futher reference. You could use C<App::rs> without any configuration,
+but of course all these settings could be customized, if
+you want to do customization reading the full mannual is highly suggested,
+it will be worth your while.
 
-Modules will be installed into the C<rs-cpan> directory under your home, and
-C<rs-meta> will be used to store metadata about those installed modules. Compilation
-will happen under the current directory, the build directory of individual module
-will be removed automatically, but the downloaded source tarballs will be preserved
-since they may be useful for futher reference. As you can see all those options
-could be customized, if you want to do customization reading the full mannual is
-highly suggested, it will be worth your while.
-
-Now you can save the configuration as C<.rs.profile> under your home directory, then
-add the path C<< <HOME>/rs-cpan/lib/perl5 >> and
-C<< <HOME>/rs-cpan/lib/perl5/x86_64-linux >> to your C<PERLLIB> environment (the
-x86_64-linux part will be different depending on your OS and architecture), after
-that it's all set up:
+The only thing you have to do is setting your C<PERLLIB> environment to include
+C<< <HOME>/CPAN/lib/perl5 >> and C<< <HOME>/CPAN/lib/perl5/x86_64-linux >>,
+assuming you're using the default configuration
+(the x86_64-linux part will be different depending on your OS and architecture),
+you don't have to do this before doing installation using B<rs> since B<rs> will automatically
+add them and print a helpful reminder if they're missing during the installation
+process. Here's some quick usage introduction:
 
     # CPAN module A::B::C will be installed along with all its dependency.
     $ rs install A::B::C
@@ -1590,6 +1589,63 @@ that it's all set up:
 
 Please see my TPF proposal for more information on the current state, plans,
 caveats, etc., I will merge it back here once the granting process finishes.
+
+=head2 CPAN COMMANDS
+
+=over 4
+
+=item install
+
+C<install> accepts the name of a CPAN module (A::B::C) as parameter and installs
+this module and all its recursive dependency. No installation will be done if this
+module is already installed, but the C<direct> flag will always be set
+in the database.
+
+=item uninstall
+
+C<uninstall> takes one argument, the name of the module to be uninstalled,
+it must be directly installed by you, i.e. not only as a dependency pulled
+in, if it's still being referenced by another module no uninstallation
+will be done, but the C<direct> flag will still be cleared in the
+database, otherwise this module will be removed along with its dependency,
+potentially its dependency's dependency, etc.
+
+=item direct
+
+Print a list of modules that're directly installed by you, in comparison to
+the C<list> command where every installed module will be printed.
+
+=item orphan
+
+Show which module has become an orphan, i.e. a module that's neither directly
+installed by you nor a dependency of another module. For example, if you only
+installed one module using B<rs> and later uninstalled it, this module and
+all of its recursive dependency will become orphans, they're removed from the
+directory into which CPAN modules are installed, but binary packages of them and
+their entries in the reference counting database are not deleted, since
+it allows instant restoration if you later decide to re-install this module,
+or if you are installing a module that shares dependency with this module.
+
+=item adopt
+
+Adopt all the orphans, binary packages of them and their entries in the
+reference counting database will all be removed, there will be no sign
+that they ever existed once this command finishes. A typical pattern would be:
+
+    # Module A::B::C looks interesting, install it and have a try.
+    $ rs install A::B::C
+
+    # Don't want it anymore.
+    $ rs uninstall A::B::C
+
+    # There will be absolutely no sign that module A::B::C is ever installed.
+    $ rs adopt
+
+=back
+
+The not CPAN specific commands L</tag> L</which> L</list> L</crowded>
+are still very useful when using B<rs> as a CPAN client, please see
+their description for more information.
 
 =head1 LICENSE
 
