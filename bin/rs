@@ -23,6 +23,14 @@ use App::rs 'sane',
 		  ['List::Util', map { "0$_" } qw/reduce all first/],
 		  ['Fcntl', map { "0$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/]];
 
+BEGIN {
+	for my $c (qw/green yellow magenta red/) {
+		no strict 'refs';
+		my $f = uc substr $c, 0, 1;
+		*$f = sub () { [$c] };
+		*{$f x 2} = sub () { ['bold', $c] };
+	}
+}
 sub set {
 	my ($f, $m) = @_;
 	# chown should be called before chmod to prevent setuid, setgid bit gets reset.
@@ -274,8 +282,8 @@ sub filter {
 	$f->({event => 'ret'}) or $v;
 }
 sub confirm ($) {
-	state $s = colored('yes', 'green', 'bold') . ' or ' .
-	    colored('no', 'red', 'bold') . ': ';
+	state $s = colored(GG, 'yes') . ' or ' .
+	    colored(RR, 'no') . ': ';
 	print shift, ', ', $s;
 	while (1) {
 		chomp(my $a = <STDIN>);
@@ -286,9 +294,9 @@ sub confirm ($) {
 }
 sub rs_unparse_wrap {
 	my $o = shift;
-	print colored("Writing $o->{d}", 'yellow', 'bold'), ': ';
+	print colored(YY, "Writing $o->{d}"), ': ';
 	rs_unparse(@$o{qw/v fd/});
-	say colored('done', 'green', 'bold'), '.';
+	say colored(GG, 'done'), '.';
 }
 sub depdiff {
 	my ($p, $q) = @_;
@@ -298,7 +306,7 @@ sub depdiff {
 sub depF {
 	my $o = shift;
 	return 1 if $o->{phase} =~ /^(configure|build|test|runtime)$/ and $o->{relationship} eq 'requires';
-	say colored(['yellow'], 'Dependency: ', jw($o), 'not installed by default.');
+	say colored(Y, 'Dependency: ', jw($o), 'not installed by default.');
 	0;
 }
 sub Nrev {
@@ -396,7 +404,7 @@ sub Nrev {
 		  # drop root privilege before compile, as suggested by many packages.
 		  my $u = $s->{'compile-as'} || $ENV{USER};
 		  if ($u eq 'root') {
-			  say colored('You are compiling as root!', 'red', 'bold');
+			  say colored(RR, 'You are compiling as root!');
 			  $root = 0;
 		  } else {
 			  runas($u);
@@ -434,7 +442,7 @@ sub Nrev {
 				       'no-make-install' => 1,
 				       'post-make-install' => "./Build install --install_base=$s->{prefix}"};
 			  } else {
-				  die colored('Neither Makefile.PL nor Build.PL found.', qw/bold red/);
+				  die colored(RR, 'Neither Makefile.PL nor Build.PL found.');
 			  }
 		  } else {
 			  my ($b, $v) = (do $s->{build}, $pkg);
@@ -481,7 +489,7 @@ sub Nrev {
   sub _which {
 	  my $r = shift;
 	  if ($r =~ m{^/}) {
-		  die colored("Absolute path $r not prefixed by $s->{root}", 'red', 'bold'), ".\n" unless 0 == index $r, $s->{root};
+		  die colored(RR, "Absolute path $r not prefixed by $s->{root}"), ".\n" unless 0 == index $r, $s->{root};
 		  $r = substr $r, length $s->{root};
 	  }
 	  my ($d, @p) = (0, split m{/}, $r);
@@ -515,8 +523,8 @@ sub Nrev {
 	  };
   }
   { my $refdb;
-    sub _ref_init () { $refdb = -f $s->{refdb} ? jr(rf($s->{refdb})) : {} }
-    sub _ref_save () { wf($s->{refdb}, jw($refdb)) }
+    sub _RR () { $refdb = -f $s->{refdb} ? jr(rf($s->{refdb})) : {} }
+    sub _RW () { wf($s->{refdb}, jw($refdb)) }
     sub _install {
 	    my $o = shift;
 	    print "Satisfying: ", jw($o);
@@ -539,7 +547,7 @@ sub Nrev {
 			    $j = Vmodinfo($o->{module});
 			    die jw($j) unless $j->{hits}{total} == 1;
 			    my $k = $j->{hits}{hits}[0]{_source};
-			    say colored("Using $k->{name} for $o->{module}.", qw/bold yellow/);
+			    say colored(YY, "Using $k->{name} for $o->{module}.");
 			    my $v = $k->{version};
 			    $j = {name => Nrev($o->{module}) . "-$v",
 				  version => $v,
@@ -562,11 +570,11 @@ sub Nrev {
 								   $D);
 	    }
 	    if (-f(my $f = "$s->{pool}$B->{name}.rs")) {
-		    say colored("Reusing compiled package $f.", qw/bold yellow/);
+		    say colored(YY, "Reusing compiled package $f.");
 		    patch($f);
 	    } elsif (not $V) {
 		    if (-f($f = "$s->{'compile-in'}/$j->{archive}")) {
-			    say colored("Reusing source archive $f.", qw/bold yellow/);
+			    say colored(YY, "Reusing source archive $f.");
 		    } else {
 			    $j->{download_url} =~ s|(?<=^http)s(?=://)|| unless $s->{https};
 			    say "Downloading $j->{download_url} @ $j->{date}...";
@@ -581,14 +589,14 @@ sub Nrev {
 	    $refdb->{$_->{module}}{referent}{$o->{module}} = $_->{version} for @$D;
     }
     sub install {
-	    _ref_init;
+	    _RR;
 	    @$s{qw/cpan rm/} = (1, 1), $s->{version} ||= 0;
 	    _install({module => my $module = shift,
 		      version => $s->{version},
 		      phase => 'runtime',
 		      relationship => 'requires'});
 	    $refdb->{$module}{direct} = 1;
-	    _ref_save;
+	    _RW;
     }
     sub _uninstall {
 	    my $o = shift;
@@ -605,26 +613,52 @@ sub Nrev {
 	    }
     }
     sub uninstall {
-	    _ref_init;
+	    _RR;
 	    my $q = $refdb->{my $module = shift};
-	    die colored("$module not installed or directly referenced by you.", qw/bold red/),
+	    die colored(RR, "$module not installed or directly referenced by you."),
 		unless $q->{current} and $q->{direct};
 	    delete $q->{direct};
 	    _uninstall({to => $module,
 			from => ''});
-	    _ref_save;
+	    _RW;
     }
     sub direct {
-	    _ref_init;
+	    _RR;
 	    print jw([map { [$_, $refdb->{$_}{current}{version}] }
 		      grep { $refdb->{$_}{direct} } keys %$refdb]);
+    }
+    sub _orphan {
+	    _RR;
+	    [grep { my $q = $refdb->{$_};
+		    my $r = $q->{referent};
+		    not ($q->{direct} or $r and %$r) } keys %$refdb];
+    }
+    sub orphan { print jw(_orphan()) }
+    sub adopt {
+	    for (@{_orphan()}) {
+		    my $q = $refdb->{$_};
+		    my $A = $q->{available} ||= [];
+		    say 'There are ', colored(YY, 0+@$A), " available versions of orphan $_.";
+		    for (@$A) {
+			    $_ = "$s->{pool}$_->{name}.rs";
+			    if (-f) {
+				    unlink and
+					say colored(GG, "$_ removed.") or
+					say colored(RR, "removing $_ failed.");
+			    } else {
+				    say colored(M, "$_ doesn't exist.");
+			    }
+		    }
+		    delete $refdb->{$_};
+	    }
+	    _RW;
     } }
   { my $cmd = shift;
     $::{$cmd}(@ARGV) }
   if ($mod)	{ rs_unparse_wrap({v => $db,
 				   fd => fileno wf($s->{db}),
 				   d => "database $s->{db}"}) }
-  else		{ say colored('Database not touched', 'green'), '.' } }
+  else		{ say colored(G, 'Database not touched'), '.' } }
 
 __END__
 
@@ -1541,7 +1575,7 @@ Now you can save the configuration as C<.rs.profile> under your home directory, 
 add the path C<< <HOME>/rs-cpan/lib/perl5 >> and
 C<< <HOME>/rs-cpan/lib/perl5/x86_64-linux >> to your C<PERLLIB> environment (the
 x86_64-linux part will be different depending on your OS and architecture), after
-that it's all setup:
+that it's all set up:
 
     # CPAN module A::B::C will be installed along with all its dependency.
     $ rs install A::B::C
