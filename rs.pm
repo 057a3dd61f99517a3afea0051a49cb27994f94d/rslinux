@@ -18,7 +18,11 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
+
 package App::rs;
+
+our $VERSION = 'v2.1.1';
+
 use strict;
 use warnings qw/all FATAL uninitialized/;
 use feature qw/state say/;
