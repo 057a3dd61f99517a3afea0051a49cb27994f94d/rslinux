@@ -22,7 +22,7 @@ use App::rs 'sane',
 		  ['Term::ANSIColor', [qw/colored c/]],
 		  [qw/Cwd abs_path getcwd/],
 		  [qw/File::Path make_path/],
-		  ['List::Util', map { "&$_" } qw/reduce all first/],
+		  ['List::Util', map { "&$_" } qw/reduce all first none/],
 		  ['Fcntl', map { "&$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/],
 		  [qw/Config %Config/]];
 
@@ -599,12 +599,11 @@ sub Nrev {
     }
     { my $l;
       sub _lib () {
-	      my (@p, @q) = split ':', $ENV{PERLLIB} || '';
-	      my %h = map { s|/$||r => 1 } @p;
+	      my @p = split ':', $ENV{PERL5LIB} || '';
 	      my $b = "$s->{prefix}/lib/perl5";
-	      if (@q = grep { not $h{$_} } $b, "$b/$Config{archname}") {
-		      $ENV{PERLLIB} = $l = join ':', @p, @q;
-		      say 'PERLLIB set to: ', c(YY, $l), '.';
+	      if (none { $b eq s|/$||r } @p) {
+		      $ENV{PERL5LIB} = $l = join ':', @p, $b;
+		      say 'PERL5LIB set to: ', c(YY, $l), '.';
 	      }
       }
       sub install {
@@ -617,7 +616,7 @@ sub Nrev {
 			relationship => 'requires'});
 	      $refdb->{$module}{direct} = 1;
 	      _RW;
-	      say 'Please set your PERLLIB environment to ',
+	      say 'Please set your PERL5LIB environment to ',
 		  c(CC, $l), ' to use the installed modules.' if $l;
       } }
     sub _uninstall {
@@ -1568,8 +1567,8 @@ but of course all these settings could be customized, if
 you want to do customization reading the full mannual is highly suggested,
 it will be worth your while.
 
-The only thing you have to do is setting your C<PERLLIB> environment to include
-C<< <HOME>/CPAN/lib/perl5 >> and C<< <HOME>/CPAN/lib/perl5/x86_64-linux >>,
+The only thing you have to do is setting your C<PERL5LIB> environment to include
+C<< <HOME>/CPAN/lib/perl5 >>,
 assuming you're using the default configuration
 (the x86_64-linux part will be different depending on your OS and architecture),
 you don't have to do this before doing installation using B<rs> since B<rs> will automatically
