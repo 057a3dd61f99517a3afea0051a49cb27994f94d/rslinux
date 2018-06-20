@@ -317,7 +317,8 @@ sub Nrev {
 	$n =~ s/-/::/g or $n =~ s/::/-/g;
 	$n;
 }
-{ my $s;
+{ local $| = 1;
+  my $s;
   { my $H = $ENV{HOME};
     my $P = "$H/.rs";
     $s = {db => "$P/db.rs",
@@ -431,7 +432,7 @@ sub Nrev {
 			      $p, $d);
 		  }
 	  } else {
-		  ($oid) = $p =~ m|([^/]*).tar.\w+$|;
+		  ($oid) = $p =~ m{([^/]*).(tar.\w+|tgz)$};
 		  ($d) = (xsh(1, qw/tar -xvf/, $p))[0] =~ m|([^/\n]*)| or die 'bad tarball.';
 	  }
 	  ($pkg) = $s->{package} || $oid =~ m|(.*)-|;
@@ -533,7 +534,11 @@ sub Nrev {
   }
   { my $refdb;
     sub _RR () { $refdb = -f $s->{refdb} ? jr(rf($s->{refdb})) : {} }
-    sub _RW () { wf($s->{refdb}, jw($refdb)) }
+    sub _RW () {
+	    print c(YY, "Writing reference counting database $s->{refdb}", ': ');
+	    wf($s->{refdb}, jw($refdb));
+	    say c(GG, 'done'), '.';
+    }
     sub _install {
 	    my $o = shift;
 	    print "Satisfying: ", jw($o);
@@ -554,8 +559,11 @@ sub Nrev {
 		    $j = Rmodinfo($o->{module});
 		    if (eval { $j->{code} == 404 }) {
 			    $j = Vmodinfo($o->{module});
-			    die jw($j) unless $j->{hits}{total} == 1;
-			    my $k = $j->{hits}{hits}[0]{_source};
+			    my @r = map { $_->{_source} } @{$j->{hits}{hits}};
+			    if (@r < 1)		{ die c(RR, "Nothing provides $o->{module}.") }
+			    elsif (@r > 1)	{ say c(YY, "Multiple modules provides $o->{module}: ",
+							join ', ', map { $_->{distribution} } @r) }
+			    my $k = $r[0];
 			    say c(YY, "Using $k->{name} for $o->{module}.");
 			    my $v = $k->{version};
 			    $j = {name => Nrev($o->{module}) . "-$v",
@@ -1645,6 +1653,11 @@ that they ever existed once this command finishes. A typical pattern would be:
 The not CPAN specific commands L</tag> L</which> L</list> L</crowded>
 are still very useful when using B<rs> as a CPAN client, please see
 their description for more information.
+
+=head1 SEE ALSO
+
+A short L<video|https://www.youtube.com/watch?v=QtMcbqtivOU> introduction
+to App::rs as CPAN client.
 
 =head1 LICENSE
 
