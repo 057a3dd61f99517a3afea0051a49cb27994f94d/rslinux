@@ -1,3 +1,8 @@
+v2.1.2 - 2018-06-29
+       - Use PERL5LIB instead of PERLLIB, which will be overriden.
+       - Fix some rare installation failures when a source archive ends
+         with .tgz, and when multiple modules provides the same packages.
+
 v2.1.1 - 2018-06-09
        - Extended App::rs to be the first reference counting CPAN client.
 

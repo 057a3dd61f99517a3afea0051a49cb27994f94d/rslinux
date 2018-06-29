@@ -21,7 +21,7 @@
 
 package App::rs;
 
-our $VERSION = 'v2.1.1';
+our $VERSION = 'v2.1.2';
 
 use strict;
 use warnings qw/all FATAL uninitialized/;
