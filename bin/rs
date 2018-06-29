@@ -22,7 +22,7 @@ use App::rs 'sane',
 		  ['Term::ANSIColor', [qw/colored c/]],
 		  [qw/Cwd abs_path getcwd/],
 		  [qw/File::Path make_path/],
-		  ['List::Util', map { "&$_" } qw/reduce all first none/],
+		  ['List::Util', map { "&$_" } qw/reduce all first none pairmap/],
 		  ['Fcntl', map { "&$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/],
 		  [qw/Config %Config/]];
 
@@ -306,12 +306,6 @@ sub depdiff {
 	my %h = map { $_->{module} => 1 } @$q;
 	grep { not $h{$_} } map { $_->{module} } @$p;
 }
-sub depF {
-	my $o = shift;
-	return 1 if $o->{phase} =~ /^(configure|build|test|runtime)$/ and $o->{relationship} eq 'requires';
-	say c(Y, 'Dependency: ', jw($o), 'not installed by default.');
-	0;
-}
 sub Nrev {
 	my $n = shift;
 	$n =~ s/-/::/g or $n =~ s/::/-/g;
@@ -440,8 +434,8 @@ sub Nrev {
 	  my $b = do {
 		  if ($s->{cpan}) {
 			  if (-f 'Makefile.PL') {
-				  {'no-configure' => 1,
-				   'post-configure' => "perl Makefile.PL INSTALL_BASE=$s->{prefix} NO_PERLLOCAL=1 NO_PACKLIST=1",
+				  {'pre-configure' => "perl Makefile.PL INSTALL_BASE=$s->{prefix} NO_PERLLOCAL=1 NO_PACKLIST=1",
+				   'no-configure' => 1,
 				   'post-make' => 'make test'};
 			  } elsif (-f 'Build.PL') {
 				  {'pre-configure' => "perl Build.PL",
@@ -477,6 +471,14 @@ sub Nrev {
 		      {to => *STDERR,
 		       from => *STDOUT,
 		       mode => '>'}, qw/| less --quit-on-intr --RAW-CONTROL-CHARS/) or die 'configure failed.';
+	  } elsif ($s->{cpan}) {
+		  my $p = jr(rf('MYMETA.json'))->{prereqs};
+		  my @d = map { pairmap { {phase => $_,
+					   relationship => 'requires',
+					   module => $a,
+					   version => our $b} } %{$p->{$_}{requires} || {}} } qw/build test runtime/;
+		  _install($_) for @d;
+		  push our @D, +@d;
 	  }
 	  xsh({'feed-stdin' => 1}, $b->{'post-configure'}, 'bash') or die 'post-configure failed.' if $b->{'post-configure'};
 	  xsh(0, 'make', $s->{jobs} ? "--jobs=$s->{jobs}" : (), @{$b->{'make-parameter'}}) or die 'make failed.' unless $b->{'no-make'};
@@ -570,22 +572,19 @@ sub Nrev {
 				  version => $v,
 				  dependency => [{module => Nrev($k->{distribution}),
 						  version => $v,
-						  slice($o, qw/phase relationship/)}]};
+						  phase => 'configure',
+						  relationship => 'requires'}]};
 			    $V = 1;
 		    }
 		    say "Latest version: $j->{version}.";
 		    return if $A and $A->{version} eq $j->{version};
-		    $q->{dependency}{$j->{version}} = [grep { depF($_) } @{$j->{dependency}}];
+		    $q->{dependency}{$j->{version}} = [grep { $_->{phase} eq 'configure' and $_->{relationship} eq 'requires' }
+						       @{$j->{dependency}}];
 		    $B = {slice($j, qw/name version/)};
 	    }
-	    my $D = $q->{dependency}{$B->{version}};
-	    _install($_) for @$D;
-	    if ($A) {
-		    remove($A->{name});
-		    _uninstall({to => $_,
-				from => $o->{module}}) for depdiff($q->{dependency}{$A->{version}},
-								   $D);
-	    }
+	    local *D = $q->{dependency}{$B->{version}};
+	    _install($_) for our @D;
+	    remove($A->{name}) if $A;
 	    if (-f(my $f = "$s->{pool}$B->{name}.rs")) {
 		    say c(YY, "Reusing compiled package $f.");
 		    patch($f);
@@ -602,8 +601,13 @@ sub Nrev {
 		    compile($f);
 		    unshift @{$q->{available}}, $B;
 	    }
+	    if ($A) {
+		    _uninstall({to => $_,
+				from => $o->{module}}) for depdiff($q->{dependency}{$A->{version}},
+								   \@D);
+	    }
 	    $q->{current} = $B;
-	    $refdb->{$_->{module}}{referent}{$o->{module}} = $_->{version} for @$D;
+	    $refdb->{$_->{module}}{referent}{$o->{module}} = $_->{version} for @D;
     }
     { my $l;
       sub _lib () {
