@@ -325,7 +325,7 @@ sub Nrev {
 	  root => "$H/CPAN/",
 	  pool => "$P/pool/",
 	  refdb => "$P/refdb.json",
-	  'compile-in' => '.'};
+	  'compile-in' => getcwd()};
     my $cmdline = arg_parse();
     my $profile = do($cmdline->{profile} || "$H/.rs.profile") || {};
     add($s, %$profile, %$cmdline);
@@ -486,7 +486,7 @@ sub Nrev {
 	  xsh(0, qw/make install/, @{$b->{'make-install-parameter'}}) or die 'make install failed.' unless $b->{'no-make-install'};
 	  xsh({'feed-stdin' => 1}, $b->{'post-make-install'}, 'bash') or die 'post-make failed.' if $b->{'post-make-install'};
 	  # do some cleaning.
-	  unless ($s->{'no-rm'}) {
+	  unless ($s->{prepared} or $s->{'no-rm'}) {
 		  my $cwd = getcwd();
 		  xsh(0, qw/rm -rf/, "../$d") if $s->{rm} or confirm "'rm -rf ../$d' on $cwd";
 	  }
@@ -544,7 +544,7 @@ sub Nrev {
 	    print "Satisfying: ", jw($o);
 	    my $q = $refdb->{$o->{module}} ||= {};
 	    my ($A, $L) = ($q->{current},
-			   $s->{latest} || $o->{version} eq 'latest');
+			   $s->{latest});
 	    if ($A)	{ return if not $L and vcmp($A->{version}, $o->{version}) >= 0 }
 	    # no update on CORE module even when latest is required.
 	    else	{ return if vsat(@$o{qw/module version/}) }
@@ -617,9 +617,9 @@ sub Nrev {
       sub install {
 	      _RR;
 	      _lib;
-	      @$s{qw/cpan rm/} = (1, 1), $s->{version} ||= 0;
+	      @$s{qw/cpan rm/} = (1, 1);
 	      _install({module => my $module = shift,
-			version => $s->{version},
+			version => $s->{version} || 0,
 			phase => 'runtime',
 			relationship => 'requires'});
 	      $refdb->{$module}{direct} = 1;
@@ -1547,15 +1547,14 @@ Just follow the usual idiom to build a Perl module:
     # make install
 
 That will install B<rs> to your system directory and it's recommended since
-you do not have to mess around with the PATH or PERLLIB environment. You could
+you do not have to mess around with the PATH or PERL5LIB environment. You could
 also install to a custom directory by using:
 
     # perl Makefile.PL INSTALL_BASE=/path/to/prefix
 
 The executable will reside in the C<bin> direcory under prefix and the Perl
-modules will be in C<lib/perl5/x86_64-linux>, the C<x86_64-linux> part will
-be different if you're using a architecture other than C<x86_64>. Adjust your
-PATH and PERLLIB accordingly.
+modules will be in C<lib/perl5>. Adjust your
+PATH and PERL5LIB accordingly.
 
 Note that since C<App::rs> is used to bootstrap both RSLinux and CPAN, it's
 explicitly designed to have no dependency other than the core Perl modules.
@@ -1577,8 +1576,7 @@ it will be worth your while.
 
 The only thing you have to do is setting your C<PERL5LIB> environment to include
 C<< <HOME>/CPAN/lib/perl5 >>,
-assuming you're using the default configuration
-(the x86_64-linux part will be different depending on your OS and architecture),
+assuming you're using the default configuration,
 you don't have to do this before doing installation using B<rs> since B<rs> will automatically
 add them and print a helpful reminder if they're missing during the installation
 process. Here's some quick usage introduction:
