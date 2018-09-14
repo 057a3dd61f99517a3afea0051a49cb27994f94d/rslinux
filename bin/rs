@@ -123,7 +123,7 @@ sub _patch {
 		my $t = $q->{sl} ? S_IFLNK : $q->{mode} & S_IFMT;
 		if ($t == S_IFDIR) {
 			if (not $db->{$_}) {
-				mkdir $f or die "mkdir $f: $!";
+				mkdir $f or die "mkdir $f: $!" if $cp->{wet};
 				$db->{$_} = {%$q,
 					     c => {}};
 			}
@@ -131,23 +131,28 @@ sub _patch {
 			_patch($cp, {v => $q->{c},
 				     db => $p->{c},
 				     d => $r . '/'});
-			set($f, $p) if not $p->{owner};
+			set($f, $p) if not $p->{owner} and $cp->{wet};
 			$p->{owner}{$cp->{oid}} = $cp->{ts};
 		} else {
-			unlink $f or die "$f exists but unable to unlink." if -e $f;
-			if ($t == S_IFREG) {
-				if ($q->{hl}) {
-					my $g = $cp->{root} . $q->{hl};
-					link $g, $f or die "unable to hard link $f to $g: $!";
+			if (-e $f) {
+				say c(YY, "$f already exists.");
+				unlink $f or die c(RR, "Failed to unlink $f.") if $cp->{wet};
+			}
+			if ($cp->{wet}) {
+				if ($t == S_IFREG) {
+					if ($q->{hl}) {
+						my $g = $cp->{root} . $q->{hl};
+						link $g, $f or die "unable to hard link $f to $g: $!";
+					} else {
+						wf($f, delete $q->{c});
+						set($f, $q);
+					}
 				} else {
-					wf($f, delete $q->{c});
-					set($f, $q);
+					# That's really nasty...
+					symlink my $g = $q->{sl}, $f or die "unable to symlink $f to $q->{sl}: $!.";
+					# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
+					lchown($f, @$q{qw/uid gid/}) and utimensat($f, $q->{mtime}) or die "$f: $!";
 				}
-			} else {
-				# That's really nasty...
-				symlink my $g = $q->{sl}, $f or die "unable to symlink $f to $q->{sl}: $!.";
-				# symlink(7) explicitly says the permission of a symbolic link can't be changed(on Linux).
-				lchown($f, @$q{qw/uid gid/}) and utimensat($f, $q->{mtime}) or die "$f: $!";
 			}
 			# A new hash is required here and above since metadata varies for non-directory.
 			my $p = $db->{$_} = {%$q,
@@ -378,10 +383,11 @@ sub Nrev {
 	  my ($oid) = $f =~ m|([^/]*).rs$|;
 	  _patch({root => $s->{root},
 		  oid => $oid,
+		  wet => !$s->{dry},
 		  ts => time}, {v => $p,
 				db => $db,
 				d => ''});
-	  $mod = 1;
+	  $mod = 1 unless $s->{dry};
   }
   sub remove {
 	  my $oid = shift;
