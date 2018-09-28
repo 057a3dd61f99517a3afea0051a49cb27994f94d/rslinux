@@ -372,22 +372,26 @@ sub Nrev {
 	  }
   }
   sub patch {
-	  my $f = shift;
-	  #   v is the parsed value of the patch, and can be cut using subtree switch,
-	  # the final patch to apply is stored in p.
-	  my $v = my $p = rs_parse($f);
-	  if (exists $s->{subtree}) {
-		  $p = {};
-		  grow($p, $v, $_) for flatten($s->{subtree});
+	  for my $f (@_) {
+		  #   v is the parsed value of the patch, and can be cut using subtree switch,
+		  # the final patch to apply is stored in p.
+		  my $v = my $p = rs_parse($f);
+		  if (exists $s->{subtree}) {
+			  die c(RR, 'You cannot use subtree with multiple patches.') if @_ > 1;
+			  $p = {};
+			  grow($p, $v, $_) for flatten($s->{subtree});
+		  }
+		  my ($oid) = $f =~ m|([^/]*).rs$|;
+		  print c(YY, "Patching $f, oid of which is $oid: ");
+		  _patch({root => $s->{root},
+			  oid => $oid,
+			  wet => !$s->{dry},
+			  ts => time}, {v => $p,
+					db => $db,
+					d => ''});
+		  say c(GG, 'done'), '.';
+		  $mod = 1 unless $s->{dry};
 	  }
-	  my ($oid) = $f =~ m|([^/]*).rs$|;
-	  _patch({root => $s->{root},
-		  oid => $oid,
-		  wet => !$s->{dry},
-		  ts => time}, {v => $p,
-				db => $db,
-				d => ''});
-	  $mod = 1 unless $s->{dry};
   }
   sub remove {
 	  my $oid = shift;
