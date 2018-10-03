@@ -18,8 +18,8 @@
 	along with RSLinux.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
-{'lost+found' => 1,
- home => 1,
+{home => 1,
+ 'lost+found' => 1,
  var => 1,
  etc => {fstab => 1,
 	 hosts => 1,
@@ -29,7 +29,15 @@
 	 netns => 1,
 	 adobe => 1,
 	 exports => 1,
-	 'resolv.conf' => 1},
+	 'resolv.conf' => 1,
+	 mtab => 1,
+	 'os-release' => 1,
+	 'machine-id' => 1,
+	 '.updated' => 1,
+	 'ld.so.cache' => 1,
+	 '.pwd.lock' => 1,
+	 udev => {'hwdb.bin' => 1}},
+ share => {info => {dir => 1}},
  lib => {modules => 1},
  boot => 1,
  proc => 1,
@@ -41,4 +49,5 @@
  root => 1,
  texlive => 1,
  p => 1,
- 0 => 1}
+ 0 => 1,
+ srv => 1}
