@@ -46,7 +46,7 @@ sub {
 			      'make-parameter' => [$l],
 			      'make-install-parameter' => [$l]},
 	 libxml2 => {'post-make' => 'make tests'},
-	 python => {switch => [qw/--enable-shared --enable-optimizations/]},
+	 python => {switch => [qw/--enable-shared --enable-optimizations --with-lto/]},
 	 'util-linux' => {'pre-configure' => './autogen.sh'},
 	 procps => 'util-linux',
 	 curl => {'pre-configure' => './buildconf'},
@@ -128,6 +128,11 @@ EOF
 		       switch => [qw/--with-openssl --enable-ssl-crtd/]},
 	 pcre => {switch => [qw/--enable-jit --enable-utf --enable-unicode-properties --enable-newline-is-any --enable-pcregrep-libz --enable-pcretest-libreadline/],
 		  'post-make' => 'make check'},
+	 pcre2 => {switch => [qw/--enable-jit --enable-pcre2grep-libz --enable-pcre2test-libreadline/],
+		   'post-make' => 'make check'},
 	 dialog => {switch => [qw/--with-ncursesw --enable-nls --with-shared/]},
+	 lzo => {switch => [qw/--enable-shared/],
+		 'post-make' => 'make check && make test'},
+	 openvpn => {switch => [qw/--enable-iproute2 --enable-systemd/]},
 	 'pkg-config' => {switch => [qw/--with-internal-glib/]}};
 };
