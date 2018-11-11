@@ -123,7 +123,7 @@ sub _patch {
 		my $t = $q->{sl} ? S_IFLNK : $q->{mode} & S_IFMT;
 		if ($t == S_IFDIR) {
 			if (not $db->{$_}) {
-				mkdir $f or die "mkdir $f: $!" if $cp->{wet};
+				mkdir $f or die "mkdir $f: $!" if $cp->{wet} and not -d $f;
 				$db->{$_} = {%$q,
 					     c => {}};
 			}
@@ -198,7 +198,7 @@ sub rm {
 					 d => $r . '/'});
 				delete $o->{$cp->{oid}};
 				if (not %$o) {
-					rmdir $f or die "unable to rmdir $f: $!." if $cp->{hard};
+					rmdir $f or warn "unable to rmdir $f: $!." if $cp->{hard};
 					delete $db->{$_};
 				}
 			}
