@@ -47,6 +47,8 @@
  run => 1,
  # to make firejail happy.
  root => 1,
+ # systemd is hard-coded to put old root into /mnt.
+ mnt => 1,
  texlive => 1,
  p => 1,
  0 => 1,
