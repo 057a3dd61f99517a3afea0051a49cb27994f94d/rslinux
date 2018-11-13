@@ -236,8 +236,12 @@ sub slice {
 }
 sub wf {
 	local $_ = shift;
-	if (-e)			{ unlink or die "$!: unable to remove $_ for writing.\n" }
-	elsif (m|(.*/)|)	{ make_path($1) unless -d }
+	if (-e) {
+		if (-f)	{ unlink or die "$!: unable to remove $_ for writing.\n" }
+		else	{ die "What's $_?" unless $_ eq '/dev/null' }
+	} elsif (m|(.*/)|) {
+		make_path($1) unless -d $1;
+	}
 	open my $fh, '>', $_ or die "open $_ for writing: $!";
 	if (@_)	{ syswrite $fh, shift }
 	else	{ $fh }
