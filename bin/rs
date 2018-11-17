@@ -22,6 +22,7 @@ use App::rs 'sane',
 		  ['Term::ANSIColor', [qw/colored c/]],
 		  [qw/Cwd abs_path getcwd/],
 		  [qw/File::Path make_path/],
+		  [qw/Scalar::Util looks_like_number/],
 		  ['List::Util', map { "&$_" } qw/reduce all first none pairmap/],
 		  ['Fcntl', map { "&$_" } qw/S_IFMT S_IFLNK S_IFREG S_IFDIR/],
 		  [qw/Config %Config/]];
@@ -507,6 +508,27 @@ sub Nrev {
 	  # the next steps.
 	  diff($oid);
 	  tag($oid) unless $s->{cpan};
+  }
+  sub group {
+	  my $group = do $s->{group} or die $@ || $!;
+	  for ($group->{+shift}($s)) {
+		  print 'Searching for ', c(Y, $_), ' in pool: ';
+		  my @pkg = glob "$s->{pool}$_*rs";
+		  die c(RR, 'not found'), "!\n" unless @pkg;
+		  if (@pkg > 1) {
+			  say c(YY, 'there are multiple choices'), '.';
+			  my $i;
+			  do {
+				  say join "\n", map { "$_: $pkg[$_]" } 0..$#pkg;
+				  chomp($i = <STDIN>);
+			  } until looks_like_number($i) and $i >= 0 and $i < @pkg;
+			  say 'using ', c(YY, $pkg[$i]), '.';
+			  patch($pkg[$i]);
+		  } else {
+			  say 'found ', c(GG, $pkg[0]), '.';
+			  patch($pkg[0]);
+		  }
+	  }
   }
   sub _which {
 	  my $r = shift;
