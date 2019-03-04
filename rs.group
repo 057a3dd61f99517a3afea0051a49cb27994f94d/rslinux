@@ -22,7 +22,7 @@
 	('base-systemd', 'glibc', 'kmod', 'util-linux', 'systemd',
 	 # should at least contain /etc/initrd-release, /init -> /sbin/init.
 	 'initrd',
-	 'linux-modules',
+	 'linux',
 	 # to mount nfs.
 	 'libtirpc', 'rpcbind', 'nfs-utils',
 	 # systemd dependency.

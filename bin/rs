@@ -408,6 +408,7 @@ sub Nrev {
 		  $s->{soft} and die;
 		  _patch({root => $s->{root},
 			  oid => $_,
+			  wet => !$s->{soft},
 			  ts => $ts}, {v => $p->{$_}{p},
 				       db => $db,
 				       d => ''});
