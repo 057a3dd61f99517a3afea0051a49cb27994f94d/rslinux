@@ -317,7 +317,8 @@ sub Nrev {
 	$n =~ s/-/::/g or $n =~ s/::/-/g;
 	$n;
 }
-{ local $| = 1;
+{ select STDERR;
+  local $| = 1;
   my $s;
   { my $H = $ENV{HOME};
     my $P = "$H/.rs";
@@ -551,7 +552,11 @@ sub Nrev {
   }
   for my $f (qw/tag crowded list which/) {
 	  no strict 'refs';
-	  *$f = sub {
+	  *$f = $s->{'no-pager'} ? sub {
+		  filter({sink => *STDOUT,
+			  f => &{$::{"_$f"}}}, {db => $db,
+						d => ''});
+	  } : sub {
 		  my $pid;
 		  local $SIG{PIPE} = 'IGNORE';
 		  { pipe my $r, my $w or die $!;
