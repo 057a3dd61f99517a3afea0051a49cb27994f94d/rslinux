@@ -268,6 +268,26 @@ sub _list {
 		}
 	 }, prophet => 0};
 }
+sub _equals {
+	my ($oid, $v, @dir) = (shift, {});
+	{subr => sub {
+		my $o = shift;
+		my $db = $o->{db};
+		if ($o->{event} eq 'ent') {
+			if (not $oid or $db->{c} ? $db->{owner}{$oid} : $db->{owner}{current} eq $oid) {
+				if (my $hl = $db->{hl}) {
+					my $r = join '/', @dir, $o->{ent};
+					push @{$v->{$hl}}, $r;
+				} elsif ($o->{db}{c}) {
+					push @dir, $o->{ent};
+				}
+			}
+		} else {
+			pop @dir;
+			$v if not @dir;
+		}
+	 }, prophet => 0};
+}
 sub filter {
 	my ($cp, $vp) = @_;
 	my ($v, $f, $db, $d) = ({}, $cp->{f}{subr}, @$vp{qw/db d/});
@@ -550,7 +570,7 @@ sub Nrev {
 		  }
 	   }, prophet => 1};
   }
-  for my $f (qw/tag crowded list which/) {
+  for my $f (qw/tag crowded list which equals/) {
 	  no strict 'refs';
 	  *$f = $s->{'no-pager'} ? sub {
 		  filter({sink => *STDOUT,
