@@ -238,11 +238,17 @@ sub runas {
 	}
 }
 sub _crowded {
+	my $oid = shift;
 	{subr => sub {
 		my $o = shift;
 		if ($o->{event} eq 'ent') {
 			my $db = $o->{db};
-			$db->{c} ? 1 : keys %{$db->{owner}{record}} > 1;
+			if ($db->{c}) {
+				$oid ? $db->{owner}{$oid} : 1;
+			} else {
+				my $rec = $db->{owner}{record};
+				keys %$rec > 1 if not $oid or $rec->{$oid};
+			}
 		}
 	 }, prophet => 0};
 }
