@@ -399,6 +399,14 @@ sub Nrev {
 				   d => "compiled package $p"});
 	  }
   }
+  sub reset {
+	  local $s->{dry} = 1;
+	  diff('');
+	  remove('');
+	  # should be empty.
+	  diff('');
+	  $mod = 0;
+  }
   sub patch {
 	  for my $f (@_) {
 		  #   v is the parsed value of the patch, and can be cut using subtree switch,
