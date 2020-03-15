@@ -134,5 +134,7 @@ EOF
 	 lzo => {switch => [qw/--enable-shared/],
 		 'post-make' => 'make check && make test'},
 	 openvpn => {switch => [qw/--enable-iproute2 --enable-systemd/]},
+	 nettle => {'post-make' => 'make check'},
+	 gnutls => 'nettle',
 	 'pkg-config' => {switch => [qw/--with-internal-glib/]}};
 };

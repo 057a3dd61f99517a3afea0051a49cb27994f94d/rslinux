@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-#   Copyright © 2018 Yang Bo
+#   Copyright © 2018-2020 Yang Bo
 #
 #   This file is part of RSLinux.
 #
@@ -294,6 +294,25 @@ sub _equals {
 		}
 	 }, prophet => 0};
 }
+sub _rename {
+	my ($from, $to) = @_;
+	{subr => sub {
+		my $o = shift;
+		if ($o->{event} eq 'ent') {
+			my $db = $o->{db};
+			my $owner = $db->{owner};
+			if ($db->{c}) {
+				$owner->{$to} = delete $owner->{$from} if $owner->{$from};
+			} else {
+				my $rec = $owner->{record};
+				if ($rec->{$from}) {
+					$owner->{current} = $to if $owner->{current} eq $from;
+					$rec->{$to} = delete $rec->{$from};
+				}
+			}
+		}
+	 }, prophet => 1};
+}
 sub filter {
 	my ($cp, $vp) = @_;
 	my ($v, $f, $db, $d) = ({}, $cp->{f}{subr}, @$vp{qw/db d/});
@@ -584,7 +603,7 @@ sub Nrev {
 		  }
 	   }, prophet => 1};
   }
-  for my $f (qw/tag crowded list which equals/) {
+  for my $f (qw/tag crowded list which rename equals/) {
 	  no strict 'refs';
 	  *$f = $s->{'no-pager'} ? sub {
 		  filter({sink => *STDOUT,
@@ -604,6 +623,7 @@ sub Nrev {
 							      d => ''})) }
 		  # we must wait here or we will lose control-terminal.
 		  waitpid $pid, 0;
+		  $mod = 1 if $f eq 'rename';
 	  };
   }
   { my $refdb;
