@@ -526,12 +526,7 @@ sub Nrev {
 	  unless ($b->{'no-configure'}) {
 		  local %ENV = %ENV;
 		  xsh(0, qw/autoreconf -iv/) or die 'autoreconf failed.' unless -e 'configure';
-		  my @p;
-		  if ($s->{bootstrap}) {
-			  $ENV{CPPFLAGS} = "-I$s->{prefix}/include" unless $b->{'no-cppflags'};
-			  $ENV{LDFLAGS} = "-L$s->{prefix}/lib -Wl,-I" . linker($s);
-		  }
-		  push @p, "--prefix=$s->{prefix}";
+		  my @p = "--prefix=$s->{prefix}";
 		  my $e = $b->{environment};
 		  $ENV{$_} = $e->{$_} for keys %$e;
 		  xsh(0, './configure', @{$b->{switch}}, @p,
