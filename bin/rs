@@ -50,20 +50,6 @@ sub elf {
 	my $b;
 	read($fh, $b, 4) == 4 and $b eq "\x7fELF";
 }
-sub strip {
-	my ($f, $m, $root) = @_;
-	my $s;
-	if (/\.[ao]$/)						{ @$s{qw/strip archive/} = (1, 1) }
-	elsif ((/\.so/ or $m->{mode} & 0111) and elf($f))	{ $s->{strip} = 1 }
-	if ($s->{strip}) {
-		xsh(0, 'strip', $s->{archive} ? '--strip-unneeded' : (), $f);
-		say "strip on $f, st: $?.";
-		if (not $?) {
-			set($f, $m);
-			$m->{size} = (stat $f)[7];
-		}
-	}
-}
 sub _diff {
 	my ($cp, $vp) = @_;
 	my ($db, $v) = ($vp->{db}, {});
@@ -393,6 +379,21 @@ sub Nrev {
     } }
   # mod tells us whether the database is modified.
   my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
+  sub strip {
+	  my ($f, $m, $root) = @_;
+	  my $o;
+	  if (/\.[ao]$/)					{ @$o{qw/strip archive/} = (1, 1) }
+	  elsif ((/\.so/ or $m->{mode} & 0111) and elf($f))	{ $o->{strip} = 1 }
+	  if ($o->{strip}) {
+		  xsh(0, my $exe = $s->{strip} || 'strip',
+		      $o->{archive} ? '--strip-unneeded' : (), $f);
+		  say "$exe on $f, st: $?.";
+		  if (not $?) {
+			  set($f, $m);
+			  $m->{size} = (stat $f)[7];
+		  }
+	  }
+  }
   sub diff {
 	  my $oid = shift;
 	  make_path($s->{pool}) unless -d $s->{pool};
@@ -404,7 +405,7 @@ sub Nrev {
 	  my $v = _diff({ih => {},
 			 root => $s->{root},
 			 oid => $oid,
-			 wet => !$s->{dry},
+			 wet => !$s->{dry} || $s->{'strip-anyway'},
 			 ts => time}, {db => $db,
 				       ign => $s->{ign} ? do $s->{ign} || die "$s->{ign} is bad.\n" : undef,
 				       d => ''});
