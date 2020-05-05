@@ -29,4 +29,8 @@
 	 'libcap', 'xz', 'iptables', 'lz4', 'dbus', 'pcre2',
 	 # dbus dependency.
 	 'expat');
- }};
+ },
+ 'initrd-usbstick' => sub {
+	 (qw'util-linux kmod bash linux',
+	  qw'glibc ncurses base');
+ }}
