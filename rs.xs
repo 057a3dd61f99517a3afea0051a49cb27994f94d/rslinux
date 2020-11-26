@@ -32,6 +32,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "fuse.h"
+
 #define STR(a)	#a
 #define STR1(a)	STR(a)
 #define WRAP(a)					\
@@ -220,3 +223,6 @@ utimensat(char *f, int t)
 		RETVAL = !utimensat(AT_FDCWD, f, times, AT_SYMLINK_NOFOLLOW);
 	OUTPUT:
 		RETVAL
+
+void
+fuse_main(SV *_, AV *__)

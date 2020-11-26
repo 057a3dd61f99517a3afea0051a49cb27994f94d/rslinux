@@ -377,6 +377,14 @@ sub Nrev {
 		  'post-data' => jw({query => {term => {provides => shift}},
 				     filter => {term => {status => 'latest'}}})});
     } }
+  sub fuse {
+	  my $root = {mode => S_IFDIR | 0775,
+		      uid => 0,
+		      gid => 0,
+		      mtime => 0,
+		      c => rs_parse(shift)};
+	  fuse_main($root, \@_);
+  }
   # mod tells us whether the database is modified.
   my ($db, $mod) = -f $s->{db} ? rs_parse($s->{db}) : {};
   sub strip {

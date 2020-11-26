@@ -36,4 +36,8 @@ WriteMakefile(NAME => 'App::rs',
 					   homepage => "https$me",
 					   bugtracker => {web => "https$me/issues"}},
 			     'meta-spec' => {version => 2}},
+	      LD => 'g++',
+	      OBJECT => ['rs.o', 'fuse.o'],
+	      INC => '-I/include/fuse3',
+	      dynamic_lib => {OTHERLDFLAGS => '-lfuse3 -lpthread'},
 	      LICENSE => 'gpl_3');
