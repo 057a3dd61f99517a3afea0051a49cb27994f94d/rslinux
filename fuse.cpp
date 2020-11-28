@@ -96,7 +96,7 @@ static const struct fuse_lowlevel_ops rs_oper = {
 	.read		= rs_read,
 	.readdir	= rs_readdir
 };
-void fuse_main(SV *_) {
+void fuse_main(HV *_) {
 	o = _;
 
 	int	argc;

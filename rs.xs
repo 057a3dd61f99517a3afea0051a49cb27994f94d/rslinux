@@ -225,4 +225,4 @@ utimensat(char *f, int t)
 		RETVAL
 
 void
-fuse_main(SV *_)
+fuse_main(HV *_)
