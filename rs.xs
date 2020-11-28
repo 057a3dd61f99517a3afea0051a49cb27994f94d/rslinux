@@ -59,7 +59,7 @@
 #define TER		sp -= 1
 #define HPACK(t, l)	*p = t, *(uint32_t*)(p + 1) = (uint32_t)l, cwrite(fd, p, 5)
 
-void *mmapr(const char *f, off_t *l)
+static void *mmapr(const char *f, off_t *l)
 {
 	int	fd;
 	errn1(fd = open(f, O_RDONLY));
@@ -72,7 +72,7 @@ void *mmapr(const char *f, off_t *l)
 	errn1(close(fd));
 	return p;
 }
-void cwrite(int fd, const char *in, size_t il)
+static void cwrite(int fd, const char *in, size_t il)
 {
 	static char	ou[BLKSZ];
 	static size_t	ol;
