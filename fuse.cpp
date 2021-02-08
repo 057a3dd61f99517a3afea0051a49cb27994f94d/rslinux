@@ -116,8 +116,13 @@ void fuse_main(HV *_) {
 	struct fuse_session	*se;
 	struct fuse_cmdline_opts	opts;
 
-	assert(fuse_parse_cmdline(&args, &opts) == 0 &&
-	       opts.mountpoint &&
+	assert(fuse_parse_cmdline(&args, &opts) == 0);
+	if (opts.show_help) {
+		fuse_cmdline_help();
+		fuse_lowlevel_help();
+		return;
+	}
+	assert(opts.mountpoint &&
 	       (se = fuse_session_new(&args, &rs_oper,
 				      sizeof(rs_oper), NULL)) &&
 	       fuse_set_signal_handlers(se) == 0 &&
