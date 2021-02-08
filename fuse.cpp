@@ -88,14 +88,17 @@ static void rs_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 	}
 	fuse_reply_buf(req, &b[0], j);
 }
-static const struct fuse_lowlevel_ops rs_oper = {
-	.lookup		= rs_lookup,
-	.getattr	= rs_getattr,
-	.readlink	= rs_readlink,
-	.open		= rs_open,
-	.read		= rs_read,
-	.readdir	= rs_readdir
-};
+static const struct fuse_lowlevel_ops rs_oper =
+	[]() {
+		struct fuse_lowlevel_ops	v{};
+		v.lookup = rs_lookup;
+		v.getattr = rs_getattr;
+		v.readlink = rs_readlink;
+		v.open = rs_open;
+		v.read = rs_read;
+		v.readdir = rs_readdir;
+		return v;
+	}();
 void fuse_main(HV *_) {
 	o = _;
 
