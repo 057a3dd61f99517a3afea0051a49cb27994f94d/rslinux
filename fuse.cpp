@@ -72,12 +72,11 @@ static void rs_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 	SVPP	p(nodeof(ino));
 	auto	b = make_unique<char[]>(size);
 	off_t	i = 0, j = 0;
-	for (const auto &q : p["c"]) {
+	for (auto &q : p["c"]) {
 		if (i >= off) {
 			struct stat	attr;
-			SVPP	r(q.value);
-			follow(r);
-			attr.st_ino = reinterpret_cast<decltype(attr.st_ino)>(static_cast<HV*>(r));
+			follow(q.value);
+			attr.st_ino = reinterpret_cast<decltype(attr.st_ino)>(static_cast<HV*>(q.value));
 			auto	k = fuse_add_direntry(req, &b[j], size-j,
 						      q.key, &attr,
 						      i+1);
@@ -109,7 +108,7 @@ void fuse_main(HV *_) {
 		const SVPP	&args{o["args"]};
 		argc = args.size();
 		for (const auto &i : args)
-			argv.push_back(SVPP(i.value));
+			argv.push_back(i.value);
 		argv.push_back(nullptr);
 	} while (0);
 
