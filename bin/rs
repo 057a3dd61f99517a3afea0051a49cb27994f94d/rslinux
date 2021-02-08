@@ -45,6 +45,12 @@ sub equiv {
 	no warnings 'uninitialized';
 	all { $p->{$_} eq $q->{$_} } qw/mode uid gid size mtime hl sl/;
 }
+sub equivnohl {
+	my ($p, $q) = @_;
+	no warnings 'uninitialized';
+	all { $p->{$_} eq $q->{$_} } qw/mode uid gid size mtime sl/
+	    and $p->{hl} ne $q->{hl};
+}
 sub elf {
 	open my $fh, '<', shift or die $!;
 	my $b;
@@ -72,7 +78,18 @@ sub _diff {
 			my $_t = $_m->{mode} & S_IFMT;
 			if ($t == S_IFDIR xor $_t == S_IFDIR)	{ ... }
 			elsif ($t == S_IFDIR)			{ $st->{dir} = 1 }
-			else					{ $st->{mod} = 1 if not equiv($m, $_m) }
+			else {
+				if (not equiv($m, $_m)) {
+					if ($cp->{relink} and equivnohl($m, $_m)) {
+						my $old = $cp->{root} . $_m->{hl};
+						say c(YY, "Linking $f -> $old");
+						unlink $f and
+						    link $old, $f or die $!;
+					} else {
+						$st->{mod} = 1;
+					}
+				}
+			}
 		} else {
 			$st->{ne} = 1;
 		}
@@ -417,6 +434,7 @@ sub Nrev {
 		  $_v = rs_parse($p);
 	  }
 	  my $v = _diff({ih => {},
+			 %$s{qw/root relink/},
 			 root => $s->{root},
 			 oid => $oid,
 			 wet => !$s->{dry} || $s->{'strip-anyway'},
