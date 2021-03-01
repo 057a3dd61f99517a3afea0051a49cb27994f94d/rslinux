@@ -159,8 +159,8 @@ sub _patch {
 				}
 			}
 			# A new hash is required here and above since metadata varies for non-directory.
-			my $p = $db->{$_} = {%$q,
-					     owner => $db->{$_}{owner}};
+			my $p = $db->{$_} = {owner => $db->{$_}{owner},
+					     %$q{grep { $_ ne 'c' } keys %$q}};
 			$p->{owner}{current} = $cp->{oid}, $p->{owner}{record}{$cp->{oid}} = $cp->{ts};
 		}
 	}
