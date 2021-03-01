@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <memory>
+#include <algorithm>
 
 #include "Perl.hpp"
 #include "fuse.h"
@@ -65,7 +66,7 @@ static void rs_open(fuse_req_t req, fuse_ino_t ino,
 static void rs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 		    struct fuse_file_info *fi) {
 	SVPP	p(nodeof(ino));
-	fuse_reply_buf(req, static_cast<const char*>(p["c"])+off, size);
+	fuse_reply_buf(req, static_cast<const char*>(p["c"])+off, min(size, static_cast<UV>(p["size"])-off));
 }
 static void rs_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 		       struct fuse_file_info *fi) {
