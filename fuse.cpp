@@ -78,6 +78,7 @@ static void rs_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 			struct stat	attr;
 			follow(q.value);
 			attr.st_ino = reinterpret_cast<decltype(attr.st_ino)>(static_cast<HV*>(q.value));
+			attr.st_mode = q.value["mode"] & S_IFMT;
 			auto	k = fuse_add_direntry(req, &b[j], size-j,
 						      q.key, &attr,
 						      i+1);
