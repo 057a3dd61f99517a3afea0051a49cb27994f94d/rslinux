@@ -1,6 +1,6 @@
 =license
 
-	Copyright © 2018 Yang Bo
+	Copyright © 2018,2021 Yang Bo
 
 	This file is part of RSLinux.
 
@@ -24,6 +24,7 @@ Devel::PPPort::WriteFile();
 require ExtUtils::MakeMaker;
 *WriteMakefile = \&ExtUtils::MakeMaker::WriteMakefile;
 my $me = '://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux';
+my $fuse = not @ARGV;
 WriteMakefile(NAME => 'App::rs',
 	      ABSTRACT_FROM => 'bin/rs',
 	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
@@ -37,7 +38,7 @@ WriteMakefile(NAME => 'App::rs',
 					   bugtracker => {web => "https$me/issues"}},
 			     'meta-spec' => {version => 2}},
 	      LD => 'g++',
-	      OBJECT => ['rs.o', 'fuse.o'],
+	      OBJECT => ['rs.o', $fuse ? 'fuse.o' : ()],
 	      INC => '-I/include/fuse3',
-	      dynamic_lib => {OTHERLDFLAGS => '-lfuse3 -lpthread'},
+	      dynamic_lib => {OTHERLDFLAGS => $fuse ? '-lfuse3 -lpthread' : ''},
 	      LICENSE => 'gpl_3');
