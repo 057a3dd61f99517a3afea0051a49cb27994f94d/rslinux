@@ -24,7 +24,21 @@ Devel::PPPort::WriteFile();
 require ExtUtils::MakeMaker;
 *WriteMakefile = \&ExtUtils::MakeMaker::WriteMakefile;
 my $me = '://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux';
-my $fuse = not @ARGV;
+
+sub arg_parse {
+	my $h = {};
+	while (@ARGV) {
+		my $a = shift @ARGV;
+		if ($a !~ /^-/)			{ unshift @ARGV, $a; last }
+		elsif ($a =~ /^--?$/)		{ last }
+		elsif ($a =~ /^--(.*?)=(.*)$/)	{ hash_madd_key($h, $1, $2) }
+		elsif ($a =~ /^--?(.*)$/)	{ $h->{$1} = 1 }
+	}
+	$h;
+}
+my $s = arg_parse();
+my $fuse = not $s->{'no-fuse'};
+
 WriteMakefile(NAME => 'App::rs',
 	      ABSTRACT_FROM => 'bin/rs',
 	      AUTHOR => ['Yang Bo <rslovers@yandex.com>'],
