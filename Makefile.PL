@@ -53,6 +53,6 @@ WriteMakefile(NAME => 'App::rs',
 			     'meta-spec' => {version => 2}},
 	      LD => 'g++',
 	      OBJECT => ['rs.o', $fuse ? 'fuse.o' : ()],
-	      INC => '-I/include/fuse3',
+	      INC => '-I/include/fuse3 -I../mp -I.',
 	      dynamic_lib => {OTHERLDFLAGS => $fuse ? '-lfuse3 -lpthread' : ''},
 	      LICENSE => 'gpl_3');
