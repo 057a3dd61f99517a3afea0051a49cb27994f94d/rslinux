@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-#   Copyright © 2018-2020 Yang Bo
+#   Copyright © 2018-2022 Yang Bo
 #
 #   This file is part of RSLinux.
 #
@@ -1832,7 +1832,7 @@ under GPLv3.
 
 =head1 AUTHOR
 
-Yang Bo <rslovers@yandex.com>
+Yang Bo <yb@rslinux.fun>
 
 =cut
 
