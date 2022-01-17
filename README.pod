@@ -1,1 +1,977 @@
-bin/rs
+=head1 NAME
+
+App::rs - The package manager for RSLinux and the first reference counting CPAN client
+
+=head1 SYNOPSIS
+
+    # compile, install, and generate package.
+    rs compile <tarball>
+    rs compile <git-directory> <oid>
+    rs --prepared compile <source-directory> <oid>
+
+    # generate package after manual installation.
+    rs diff <oid>
+
+    # install a previously compiled package.
+    rs patch <path/to/oid.rs>
+
+    # remove a package.
+    rs remove <oid>
+
+    # display the package tagged as oid.
+    rs tag <oid>
+
+    # show relative entry in database
+    rs which <path>
+
+    # print a list of installed packages
+    rs list
+
+    # find places where multiple packages tried to install
+    rs crowded
+
+    # install CPAN module A::B::C recursively (i.e. including dependency)
+    rs install A::B::C
+
+    # uninstall CPAN module A::B::C recursively (i.e. including dependency)
+    rs uninstall A::B::C
+
+    # print a list of installed modules directly from you (i.e. not dependency)
+    rs direct
+
+    # show a list of modules that are orphaned (i.e. not referenced by anybody)
+    rs orphan
+
+    # adopt all the orphans and you will never be able to see them again.
+    rs adopt
+
+=head1 DESCRIPTION
+
+(Please see the section L</CPAN> and
+L<my TPF proposal|https://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux/blob/rs/TPF-proposal.pod>
+for my ongoing effort to marry C<App::rs> and CPAN.)
+
+RSLinux was born out of desire for freedom. Back in 2012, I was using
+ArchLinux, as with many distributions at that time, it's switching to
+systemd, and I would be forced to switch to it if I chose to update. It
+frustrated me deeply, as I always seek freedom, from a very young age, and I
+knew from my own experience that no matter how wonderful a thing is, it
+will become a demon that haunts me once I'm being forced to do it. I made
+up my mind to create something of my own so that I have complete freedom
+to choose how it would be.
+
+At first, I got my hand dirty with LFS, succeeded and got pretty satisfied
+with it. Later in 2013, I made it again without following the LFS book, I
+tried a different bootstrapping process with what I thought was right and
+necessary, and it fits my mind much better. I typically rebuild my system
+on an annual basis, after I did it in 2014 I gradually realized its problem,
+without a package manager, thus an easy way to remove installed package,
+I tended to dislike denpendency, and prefer a minimalist system, which
+prevented me to explore since I knew I would have no easy way to clean up the mess
+after I installed a lot of things, experimented with them a bit, and then
+decided that I don't want them anymore.
+
+I knew it was bad, and something to be dealt with. In the end of 2015, I
+was working on something that's recursive, and it inspired me to
+write a simple and elegant package manager B<rs>, since directory and files,
+which a package manager deals everyday, recursiveness is in their nature.
+
+B<rs> keeps a database of the metadata of every file/directory that you didn't ask
+it to ignore, you will typically ask it to ignore something like C</tmp>,
+C</proc>, etc., if you're using it to manage system wide packages. With
+B<rs> you compile and install a package from source as usual, and when the
+installation process is done, you run C<rs diff oid>, B<rs> then starts
+a scan of the root directory into which you just installed your package,
+and during the scan process, it compares what's actually there with the
+database, calculate the difference between them as well as updating the
+database, and when the scan process ends, the difference is then tagged
+as C<oid> in the database, serialized and stored as C<oid.rs>, and the
+database is saved as well.
+
+This serialized difference is what B<rs> considers as a package, and it could
+be transferred across machines and installed using C<rs patch>, it's very
+much like a tarball, but I could not just use a tarball since I need to maintain
+all these metadata in the database when patching, instead of parsing a tarball
+I thought I might just use a trivial binary format that integrates well with
+B<rs> and suits my need.
+
+Being someone who came from LFS, I knew this is a game changer, it gave me a
+complete new experience, besides the ability to explore without any hesitation,
+I could easily upgrade, or switch between multiple versions of package;
+I could now compile once on desktop, and then install the compiled package
+on laptop, or vps; I could select a few packages, patch them, and then make
+a bootable usb disk or cdrom, or a complete environment that's suitable to
+put into a container and run web service. I sincerely believe anyone who
+likes LFS will like it, and anyone who likes the freedom of LFS but hated
+the inconvenience will like it also, since B<rs> eliminates ninety percent
+of the inconvenience yet without sacrificing even a tiny bit of the freedom.
+
+RSLinux is a Linux distribution, but not necessarily so, it's a way of doing
+things more. You do not need to take a full commitment using it as a
+distribution, there're almost always packages that you care about more and
+want to follow closely, while other people haven't packaged it for you,
+B<rs> is a perfect choice for this, you could use B<rs> to properly manage
+packages somewhere inside your home directory while still using your
+favorite distribution.
+
+Till this day, I still haven't tried systemd once, I don't know one single
+objective reason why I don't use it, but it's true enough that it's the
+very first motivation that got all these things started. I guess that's just
+how the world is, few things are objective while basically everything is
+subjective. Nevertheless, the goal of B<rs> is to avoid all these subjective
+feelings and views on how a distribution should be made, which init system
+should be used, what configure switches, compiling flags should be passed,
+whether stable version should be preferred over bleeding edge version or the
+other way around, how a filesystem hierarchy should be laid out. Whatever
+you feel is right, you just go for it, and what B<rs> does is to make this
+process easier. Since the packaging by C<diff> method is general, it works
+with every single package with no exception, you don't need any tweak for
+an individual package, thus most packages need zero configuration, and all
+the build instructions I used to build a distribution that I use everyday
+are only literally one hundred lines long.
+
+Still, RSLinux will never be easier than a classic distribution where other
+people do everything for you, but there're still many things to do and
+improve, and I do think in the long run the effort will be negligible
+and the reword will be immense. If you never tried LFS or something like
+it before, I suggest you use B<rs> to manage a couple of packages user wide
+while retain your distribution untouched, once you get your way around it,
+then maybe consider to jump on the ship, there's nothing to be afraid of.
+
+=head1 OPTIONS
+
+=over 4
+
+=item * --root=<dir>
+
+Specify the directory in which B<rs> will operate, it will scan this
+directory for newly installed files during a C<diff> operation, and
+will put or remove files under it during a C<patch>, C<remove> operation
+respectively.
+
+=item * --db=<file>
+
+Specify the database where all the metadata of the files and directories
+in C<root> is stored. If it doesn't exist yet B<rs> will create an empty
+one for you. But you should always specifiy it since it's used by
+all of the commands.
+
+=item * --pool=<dir>
+
+The direcory where a generated package will be stored during a C<diff>
+command. It's also occasionally used when you C<remove> a package, see
+the L</remove> command for more detail.
+
+=item * --prefix=<dir>
+
+Definitely the most used compiling option, all packages use it somewhere
+somehow during the compiling process. Defaults to the directory specified
+by C<--root>.
+
+=item * --compile-as=<user>
+
+Typically you need to run as root if you want to install a package globally
+into the system directory, however most packages recommend compiling as
+a non-privileged user and few even make it mandatory. If you specify this
+option, and you're running as root, B<rs> will switch to the user specified
+when compiling.
+
+=item * --compile-in=<dir>
+
+The directory to change into when compiling, if you use it with C<--compile-as>
+make sure the directory is writable by that user.
+
+=item * --build=<file>
+
+Building instructions, see L</build>.
+
+=item * --ign=<file>
+
+This is the file that specifies which directory/file should be ignored when doing
+a C<diff>, see L</ignore>.
+
+=item * --profile=<file>
+
+Since many options are used everytime, it would be really tedious to type them
+out each time you run B<rs>, a profile allows you to collect these options
+into a file so that you do not have to do it everytime, and you could easily
+switch between multiple profiles. See L</profile>.
+
+Not surprisingly, options in the command line take precedence over the
+ones in a profile.
+
+=item * --package=<package name>
+
+B<rs> will try to use the build instructions associated with this package
+name. Normally you don't have to specifiy this, since it's automatically
+calculated from C<oid>, for example, if you use C<perl-v5.22.3> as C<oid>,
+the package name will be C<perl>. Nontheless sometimes it could come in
+handy.
+
+=item * --subtree=<relative path>
+
+Typically when you install a package using C<rs patch> everything inside
+it will be installed, this option allows you install only some part of it.
+You could pass this option multiple times.
+
+=item * --prepared
+
+If you pass a directory as arugument to C<rs compile>, B<rs> will assume
+that it's a git directory, use this option if it's a prepared source
+directory instead.
+
+=item * --branch=<branch or tag>
+
+Checkout this branch or tag when compiling from a git directory. By default
+B<rs> will try to use the C<oid> you specified as the branch or tag to checkout.
+
+=item * --bootstrap
+
+Let B<rs> know that you're bootstrapping the toolchain, additional flags to
+set include path, library path, and dynamic interpreter will be passed to
+related compiling process, so that the final toolchain is self-contained.
+
+=item * --jobs=<number>
+
+How many parallel jobs should be used during C<make>.
+
+=item * --no-rm
+
+By default B<rs> will ask you if you want to remove the temporary build
+directory if you're compiling from a tarball or a git directory, if you
+toggle this option it will not try to remove the build directory.
+
+=item * --dry
+
+Tell the C<diff> command to only show the difference, neither gernerate
+package nor update the database.
+
+=item * --soft
+
+Used with C<remove>, such that no file/directory will be removed, but
+the entries in the database will be removed as usual, it's used to
+do arbitrary L<amending|/AMEND>.
+
+=item * --refdb=<file>
+
+The database that connects all the packages together, it's the core data structure
+used for managing CPAN modules. Currently it uses JSON as its format.
+
+=item * --latest
+
+This option applies to the C<install> command, so that it will check the
+CPAN module to be installed and all its recursive dependency for updating.
+
+=item * --version=<version>
+
+Specify the minimum version requirement for the CPAN module to be installed so that it will
+be updated if it's already installed but failed to satisfy the requirement.
+
+=back
+
+Note that all options should be specified before any command.
+
+In the following text sometimes I refer to the value of an option as
+the name of the option with the preceding C<--> removed, like C<pool>
+to mean the value of the option C<--pool>.
+
+=head1 COMMANDS
+
+=over 4
+
+=item diff
+
+The C<diff> command takes one argument, C<oid>, it traverses the root
+directory and tag the difference between the content there and what's
+recorded in C<db> as C<oid>, and serializes it as C<oid.rs> in C<pool>.
+
+You can choose anything you want as C<oid>, usually you want to use
+something meaningful like the package name with the package version appended,
+such as C<gcc-6.4.0>.
+
+If the C<oid.rs> already exists in C<pool>, the new difference will be merged with
+the old, this way the C<diff> command could do limited amending, that's most
+useful when you forgot to install something, like documentation, you could
+always install it later and merge with the content you installed previously.
+See L</AMEND> for why amending using C<diff> is limited and how to do
+arbitrary amending.
+
+If the option C<dry> is given, the difference will only be displayed, that's
+handy to check if your system is consistent with what's recorded in the database,
+the difference should be empty if you didn't do a mannual installation, or you
+can have a preview of what's installed if you did do that.
+
+=item compile
+
+The C<compile> command integrates the C<diff> and C<tag> commands to make
+it easier for you to install a package from source, it automatically
+compiles and installs a package, then does a C<diff> command followed
+by a C<tag> command.
+
+The compiling instructions are taken from the L</build> configuration file
+with the entry associated with the package name. The package name could
+be set explicitly by the C<--package> option, or more commonly it's derived
+from C<oid> by using the longest prefix of it before the C<-> character,
+for example, with C<man-pages-4.15> as oid the package name will default to
+C<man-pages>, and with C<perl-v5.22.3> it will be C<perl>.
+
+There're three types of compile commands, compile from a tarball, a git directory,
+or a prepared source tree.
+
+=over 4
+
+=item * compile <tarball>
+
+B<rs> will extract, compile, then install the tarball in the direcory
+C<compile-in>, or the current directory if it's not specified.
+The filename of the tarball, with the extension name like C<.tar.gz>,
+C<.tar.xz>, etc. stripped, is used as C<oid> to the C<diff> command. For
+example, if the tarball is C<man-pages-4.15.tar.xz>, the C<oid> will be
+derived as C<man-pages-4.15>, just C<mv> the tarball if you want to change
+the C<oid> to something different.
+
+=item * [--branch=<branch>] compile <git-directory> <oid>
+
+B<rs> will do a C<git clone> from the specified git directory, checkout branch
+or tag specified by the C<--branch> option or C<oid> if absent, in C<compile-in>,
+and then compile and install the package.
+
+=item * --prepared compile <source-directory> <oid>
+
+B<rs> will C<chdir> into the prepared source directory and start the compiling
+process, thus the C<compile-in> directory is ignored in this case. It's
+useful when you need more complex preparations of the source like applying some
+patches, or initializing git submodules, etc.
+
+=back
+
+The C<compile> command really covers ninety percent of the case, but it may
+not be flexible enough to compile every package in the wild, but that's
+actually okay, since you could always do a manual installation followed
+by a C<diff> command.
+
+=item patch
+
+C<patch> takes one argument, a compiled package file <path/to/oid.rs>, which
+is produced by a previous C<diff> command, it then installs the package into
+C<root> and tag it as C<oid>.
+
+Optionally, one or more C<--subtree> could be provided so that only part of
+the package is installed, for example, C<--subtree=bin/> will instruct B<rs>
+to only install anything under the C<bin> directory of the package. It's
+also particularly handy to let a file be from a specific package, if there're
+multiple packages that contain it.
+
+=item remove
+
+C<remove> takes one argument, the C<oid> of the package to be removed.
+B<rs> will remove both the content of the package under C<root> and
+its metadata in the database.
+
+Sometimes, different packages install files into the same location. B<rs>
+takes care of that by recording a list of owners associated with a file,
+along with the timestamps when ther're installed, that's why you are seeing
+all the C<oid>s floating around the manual, it means I<owner's id>. And
+when you remove a package, a file is removed if and only if this package
+is the most recent owner of it, and if it's not, nothing will happen,
+only the entry in the owner recording list will be removed. On the other hand, if
+you're removing a package that's indeed the most recent owner of a file,
+but this file has multiple owners, then the file will be restored
+to the version of the second most recent owner. That's why I said earlier
+that the C<--pool> option is used not only when diffing, but also removing
+sometimes. Suppose the second most recent owner is C<oid>, then B<rs> will
+try to parse the compiled package C<oid.rs> in C<pool>, and restore the file
+according to it.
+
+=item tag
+
+C<tag> takes one argument C<oid> and displays a list of files which are
+owned by it, followed by the detailed metadata about them in the database
+as JSON.
+
+=item which
+
+Takes an absolute path or a path that's relative to the C<root>, display
+its entry in the database, useful to find out to which package a file belongs.
+
+=item list
+
+Print a full list of installed packages, sorted from the most recent to the least.
+
+=item crowded
+
+Find out the crowded places, where more than one package likes to reside, that's
+useful if you want a file from a specific package, and also to discover
+accidental overwrite.
+
+=back
+
+=head1 CONFIGURATION FILES
+
+(Note I intentionally blur the difference between things like a hash and a hash
+reference in the following text, since it's easier to type, and also to comprehend
+for non-Perl speakers, Perl speakers should always know what I'm talking
+about.)
+
+All configuration files are evaluated using Perl's C<do> statement and
+a hash is expected as the return value, with the exception
+that the L</build> configuration could also return a subroutine.
+
+You don't necessarily have to know Perl to write the configuration files,
+you could just write them in JSON with the C<:> separator substituted
+as C<< => >>. That being said knowing a bit of Perl surely will help
+you use B<rs> to its best potential, and you don't have to be a Perl
+expert to write it, so don't be afraid.
+
+See also the released VM image to have a look at some sane configuration
+files and get you started.
+
+=over 4
+
+=item profile
+
+This is a configuration file which collects options that you always need
+to specifiy. The keys of the hash are option names while the values are,
+well, corresponding values. A typical profile looks like:
+
+    {db => '<file>',
+     build => '<file>',
+     ign => '<file>',
+     pool => '<dir>',
+     'compile-as' => '<user>',
+     'compile-in' => '<dir>',
+     root => '<dir>',
+     jobs => <number>}
+
+=item build
+
+This file specifies the building instructions, it's only used by the
+C<compile> command, the keys are package names while the values are
+hashes that detail the instructions on how the build process
+should be done. In the following text that explains the build process,
+you'll often see I<the value of something>, or I<if something exists>,
+it's talking about this hash.
+
+For many packages the build instruction is exactly the same, you could
+alias the build instruction of a package to another one by setting it
+to the name of the other package.
+
+As previous mentioned, instead of a hash, the C<build> file
+could also return a subroutine which will be called with a collection
+of the options, you could then return the building instructions differently,
+depending on whether you're bootstrapping or not, for an example.
+
+The build process is divided into several steps:
+
+=over 4
+
+=item 1. pre-configure
+
+If C<pre-configure> exists, the value of it should be a string and
+B<rs> will try to evaluate it with C<bash>, before running the
+C<configure> script.
+
+Usually something like C<autogen.sh> or C<bootstrap> is run in this step.
+
+=item 2. configure
+
+Unless there's a true value in the C<no-configure> slot, B<rs> will
+try to run the <configure> script, if it doesn't exist B<rs> will
+run C<autoreconf> to make one. A C<--prefix> switch is always passed,
+using the value of the C<prefix> option, along with the value of
+C<switch> slot, which if exists, should be an array of configure options
+that should be passed to the C<configure> script.
+
+B<rs> will pipe the output of C<configure> to the pager C<less>,
+since C<configure> usually outputs important information about whether
+a package is properly configured, you should briefly scroll over the
+outputs, and exit the pager normally using the C<q> key to start C<make>,
+after the C<configure> script stopped procuding output, you don't want
+to start C<make> before C<configure> finishes.  If you find something
+wrong in the C<configure> outputs, you should type C<Ctrl-C> to abort
+the compile process.
+
+=item 3. post-configure
+
+Like C<pre-configure>, C<post-configure> should contain a string to
+be evaluated by C<bash>, it will be run after the C<configure> script.
+It's usually coupled with C<no-configure> to build packages that
+don't use a C<configure> script.
+
+=item 4. make
+
+Unless C<no-make> is true, B<rs> will run C<make> to build the package,
+C<make-parameter> could be an array of parameters that should
+be passed to make, the command line option C<jobs> tells how many parallel
+processes to use.
+
+=item 5. post-make
+
+The value of C<post-make> should be a string to be evaluated by C<bash> if
+exists, it's run after C<make> is finished, most commonly something
+like C<make check> or C<make tests> happens here.
+
+=item 6. make install
+
+B<rs> will run C<make install> to install the compiled package, the value of
+C<make-install-parameter> could be an array of parameters to be passed to C<make>.
+
+=item 7. post-make-install
+
+The value of C<post-make-install>, if exists, should be a string to be evaluated by
+C<bash>, it's run after C<make install>, if you want to make some symbolic links,
+remove some undesired files after installation, that's the place to go.
+
+=back
+
+An example C<build> file:
+
+    {gmp => {'post-make' => 'make check'},
+     mpfr => 'gmp',
+     'man-pages' => {'no-configure' => 1,
+		     'no-make' => 1},
+     ncurses => {switch => [qw/--with-shared --without-debug/]},
+     'XML-Parser' => {'no-configure' => 1,
+		      'post-configure' => 'perl Makefile.PL',
+		      'post-make' => 'make test'},
+     git => {'make-parameter' => [qw/all doc/],
+	     'make-install-parameter' => [qw/install-doc install-html/]}}
+
+=item ignore
+
+This is typically used when you're installing into a system-wide location,
+you certainly would not want to include the content of C</proc>, C</sys>
+into your package during a C<diff> command, and this file is where to
+put it.
+
+If you want to ignore a file/directory completely, at the top level,
+add a hash entry with the name as the key and C<1> as the value. For
+a directory, you may want to be more specific, like ignore only part
+of it while care for the rest, then you should make the value a hash
+to specify what should be ignored under this directory, and if some
+of sub-directories should also be partially ignored then you nest a
+hash inside again. So yeah, it's recursive and like a tree, naturally.
+
+Suppose you want to ignore C</proc> and C</sys> completely,
+C<resolv.conf> and C<hosts> inside C</etc> but not the others, you
+could write:
+
+    {proc => 1,
+     sys => 1,
+     etc => {'resolv.conf' => 1,
+	     hosts => 1}}
+
+=back
+
+=head1 ADVANCED
+
+=head2 AMEND
+
+You may find that you forgot to install something, or you installed more than
+you should from a package, the process of fixing all that up is called I<amend>.
+
+In the description of the C<diff> command a brief introduction to amending
+is included, but it's limited and you could only add or overwrite things.
+So why is that? You may get the impression now that B<rs> acts more like a
+version control system than a traditional package manager, while that's true,
+it's also not a version control system, it expects the packages that it manage
+to be independent to an extent, i.e. during the installation of a package
+a file/directory of another package will not suddenly be removed, that's really
+normal for a vcs since a patch in a vcs is always applied to a previous state,
+but a patch in B<rs> could always be applied to nothing, much like you could
+always extract a tarball into an empty directory, in the terminology of C<git>,
+that is, a patch in B<rs> doesn't have a parent.
+
+In fact, I never encountered any package that removes files during a
+C<make install>, it overwrites files at worst, and B<rs> will handle that
+well.
+
+But there're indeed sometimes you installed more than you should and you
+want to remove things you don't want from a package, well, first you should
+C<remove> this package completely, then C<patch> it using a temporary C<root>
+and C<db>, do whatever you want with this temporary C<root> using shell
+commands, file mangager, emacs or whatever you want and then do a C<diff>
+with the same C<root>, an empty C<db> and a temporary C<pool>, after that
+you should move the newly generated B<rs> package into your normal C<pool>
+and C<patch> that with your usual configuration. Yeah, that maybe a little
+bit complicated, but it rarely happens, just know it could be done and
+refer to this section again when you find yourself in this kind of situation.
+
+=head3 Amend by soft C<remove>
+
+In comparison with amending by C<diff>, where you could only add or overwrite
+things, this method allows you do arbitrary amending.
+
+First, you do a soft C<remove> with the package you want to amend, then
+you delete or overwrite anything of this package or add things to it,
+after that remove the compiled package in C<pool>, finally you run C<diff>
+to generate the new modified package.
+
+Since it relies on the filesystem to generate package, if some of its files
+are overwritten by others, then they're lost, it may very well be what you
+want, or not, you could always do the C<patch diff patch> method mentioned
+previously.
+
+=head2 UPGRADE
+
+If a package is not essential to build itself it's really easy to upgrade
+it, just C<remove> it and then install it again, so while it's trivial to upgrade
+wget or curl, you need more consideration to upgrade glibc.
+
+The problem is that usually C<make install> uses the command C<install> to
+do the installation, and the C<install> command overwrites a file instead
+of removing it and create a new one with same name.  That's actually
+pretty different, since overwrite a file while there're still other
+process accessing it will cause undefined results, but remove a file
+and create a new one with the same name will not influence any other
+process that's still accessing the removed file in any way since they're
+two different files.
+
+So, you have to make sure that no other process is accessing a file when
+when you overwrite it, which is impossible for C<make> itself, to say the
+least, and any program C<make install> launched when you're overwriting it.
+Or you have to remove it before C<make install> but you certainly cannot
+remove C<make> since you need C<make> to do C<make install>. That's the
+reason not to throw your toolchain away when you are done bootstrapping,
+the toolchain resides in a different path and you don't have to worry about
+it getting overwritten, and it provides a complete environment for building
+so you could safely remove any package even glibc, while using this
+environment to build a new one.
+
+In summary, always remove a package before install a new version of it by
+compiling from source, usually you don't want to overwrite files unless
+you're absolutely sure no one is using them. And use the toolchain to
+build the package if the package requires itself to do C<make install>.
+
+=head2 INSTALLATION
+
+=over 4
+
+=item 1. No installation at all
+
+With the advancing with various namespaces, this kind of installation
+actually makes perfect sense, you could boot and live with your favorite
+distribution while entering RSLinux in isolated namespaces for
+exploration. Since VM images are used for release it's very easy to
+do so by mounting the image directly.
+
+=item 2. Live replace
+
+You could do installation by simply swap directories under your current
+root and the ones under your newly prepared system, what you need is
+a third environment to do the actual swap, so that you are safe since
+everything under the main system will be unavailable during moving.
+
+The third environment doesn't need to be large, just C<bash> and C<coreutils>
+could be enough for the swapping task, C<patch> a few more packages to help
+you if you feel unsafe. Then you enter this container with the root directory
+bind mounted somewhere under it, and start moving things around, also pray
+that electricity won't be cut while you're doing it.
+
+This method is the best option to install RSLinux on a system that's already
+running Linux, and probably the only option to install it on a OpenVZ based VPS.
+
+=item 3. Bootable media
+
+If a system is not running Linux already, you cannot use the live replace
+method to install RSLinux, you have to use a bootable media like USB disk
+or CDROM.
+
+A USB disk is handy to do installation locally while a CDROM image is
+suitable to install remotely on a KVM based VPS. For both situations
+the most important utilities to include are probably the ones to do
+disk partition and filesystem formatting, for remote installation, it's
+best to make the CDROM image as small as possible and transfer all the
+packages to be installed via network at some later point since it's much easier
+to re-upload the image if you forgot to C<patch> some vital packages into it,
+so be sure to include something like C<socat> or C<rsync> or C<openssh>
+for C<scp> depending on your mood or taste, and of course the C<iproute2>
+package and necessary kernel modules to bring up the network.
+
+=back
+
+=head3 A faithful recording of live replace installation on a OpenVZ based VPS
+
+I now have a complete RSLinux system inside a directory on my VPS, I have
+already entered it several times and I'm confident that it's good, and the
+next step is to swap it with the current distribution.
+
+Since it's a VPS I must login remotely, so in addition to C<bash> and
+C<coreutils> I will C<patch openssh> in the third sanctuary as well,
+so that's the list of things I want directly. Now the dependencies,
+well, definitely C<base> since it setups the directories that a sane
+person will always want, and needless to say C<glibc>, since I always
+compile C<bash> with curses so C<ncurses> as well, and C<openssl> since
+that's what C<openssh> is built upon. So the complete list is
+C<base glibc ncurses bash coreutils openssl openssh>. Now I'm going to try and see
+how it works out.
+
+Well, apparently C<openssh> needs C<zlib> as well, that's the only thing I
+forgot, after C<patch zlib> I successfully entered this sanctuary with the
+root directory bind mounted somewhere under it and launched C<sshd> on a
+different port, confirmed that I could login through it. Then I did the
+actual swap, moved everything under root to a backup directory, well,
+except the usually mounted C</proc /sys /dev>, since it's meaningless to
+C<umount> them and then C<mount> later, after that I moved all the directories
+of the already prepared RSLinux into root, then I entered this fresh root,
+played around a little bit, launched C<sshd> and ended the session with
+the C<sshd> of the sanctuary.
+
+Finally, I did a login through the C<sshd> of RSLinux I just launched, cleaned
+up all the applications of the old system and sanctuary that're still running,
+and mountpoints related to them. After that I did a C<rm -rf> on the backup
+directory and the sanctuary to celebrate, the installation is done!
+
+So yeah, the previously mentioned eight packages are guaranteed to do a
+successful live replacing installation, and I'm sure you can reduce the
+number even more if you want. It surely is an exicting, adventurous, and
+fruitful journey for me, and it's not that hard, so don't hesitate to give
+it a try.
+
+=head3 A faithful recording of CDROM installation on a KVM based VPS
+
+The first step is of course making a list of the packages that I need,
+since this is a KVM based VPS I need to do disk partition, so C<fdisk>
+from C<util-linux> is absolutely necessary, and needless to say the
+C<mount> command from it, and in order to C<mount> I have to format it
+first, so C<e2fsprogs> as well, and I like C<syslinux> as the bootloader
+so include that too. The next thing to consider is how to transfer the
+compiled packages, I never include them in the iso image since I don't
+want to upload a big iso file again if I made a mistake, instead they're
+transferred using network, this immediately implies that C<iproute2>
+is required, while there may be some circumstances that you don't need a
+encrypted connection, but I think I'll just stick to C<scp> of C<openssh>,
+for good practice, and the additional benefit to login via C<ssh> if
+the installation is complicated, so add C<openssh> to list.  Also, I
+definitely want to pack things into a tarball, so put C<tar> on the list
+so that I could unpack them later.  Finally, C<bash> and C<coreutils>
+of course, they're essential for the commandline.
+
+That's everything I need directly, but since it's expected to boot from
+this environment, a init system, kernel modules, C<eudev>, C<kmod> are
+also required, I always use my one-liner Perl script as the init system
+so I will patch C<perl> as well.
+
+Now the dependencies, C<openssl zlib> are required for C<openssh>,
+C<ncurses> is required for C<bash>, and C<glibc> is required by
+everybody, and C<base> for a sane person, so the final list is C<base
+glibc ncurses bash coreutils util-linux e2fsprogs syslinux openssl zlib
+openssh iproute2 perl eudev kmod tar>, now I'am going to C<patch> them into a
+temporary directory and make a bootable iso out of it and see how things
+are going.
+
+So I C<patch>ed all the packages, copied the kernel and its modules, along with
+relative C<isolinux> file and configuration, setup the script to boot, and
+finally generated the iso using C<mkisofs>. After that I launched to C<qemu>
+to test it, well, I forgot that C<agetty> will launch the C<login> program
+which is from C<shadow-utils>, and the C<ip> command will link against
+C<libmnl> if available, but that's fine, I C<patch>ed them and regenerated
+the iso, did extensive testing on it and became pretty confident that it's solid.
+
+And with all these preparations done the rest was really easy and smooth, I
+uploaded the iso file and booted the VPS, did disk partition first, formatted
+the filesystems after that, and then installed the bootloader, finally tranferred
+the root filesystem tarball using C<scp> and extracted it. I rebooted the
+VPS and saw a login prompt as a indication of success, the installation is done!
+
+=head1 PERFORMANCE
+
+B<rs> is actually pretty efficient, all the serializations routines are
+written in C<C>, the first C<diff> operation will probably take some
+noticeable time if you're not using a SSD since all the metadata is not
+yet cached, that's just like the first C<git status> command inside a
+repository, but the succesives ones take negligible time. Also note that
+the C<diff> operation is only needed on the machine that does the actual
+compilation, which will usually be the most powerful one you can get your
+hands on, if you only install pre-compiled packages on a machine that's
+really just like extracting a tarball, performance is not an issue there.
+
+=head1 CONTRIBUTING
+
+Try it! Download the VM image and play around with it, share your thoughts,
+make suggestions or reporting bugs. Spread the word around if you find it
+good or useful.
+
+At some later point you may want to have a look at the guts of B<rs>, try
+to add a new functionality or fix an existing problem, I'll always be
+glad to see a new quality pull request.
+
+You can also contribute by hiring me or help getting me hired,
+if you find me appropriate for a job, a stable living for the author
+is surely inevitable for a healthy project.
+
+Support me during the TPF granting process, it will find me the necessary
+time and resource to work on C<App::rs> and make it better.
+
+=head1 VM image
+
+A VM image to be used with C<qemu> in raw format is released on
+L<github|https://github.com/057a3dd61f99517a3afea0051a49cb27994f94d/rslinux/releases>
+as a demostration of RSLinux, it contains all the neccessary packages
+to build itself, as well as some basic utilities.
+
+You should first decompress the image using C<xz -d>, then launch it via:
+
+    # qemu-system-x86_64 -machine accel=kvm -hda vm.img -m 512M -net nic -net user,hostfwd=::2222-:2222
+
+A C<sshd> will be running in the guest and you could login through it using
+C<ssh -p 2222 user@localhost>, the password for root is C<rslinux>, there's
+also a non-privileged user C<somebody> with the same password in case you
+do not like wandering around with root. You could also forget about C<ssh>
+all together and use the GUI of C<qemu> if you happen to like it.
+
+For simplicity, I used a Perl one liner as the init system, it's a poor
+man's init but it does the job, it starts twelve virtual consoles from
+C<tty1> to C<tty12> but it doesn't restart them, so don't be confused
+if you logged out but a new login prompt is not displayed, just restart
+the VT mannually using C<setsid /sbin/agetty ttyX>. Feel free to change the
+init system to whatever you like, the whole point of RSLinux is to go
+for it instead of doing meaningless arguing with others.
+
+The B<rs> profile is already properly written under the home of C<root>, it's
+highly recommended to login as C<root> first, and have a look at how all the
+configuration files are chained together, and play around a little bit to
+get familiar with B<rs>. There're two source tarballs, one of C<emacs> and
+another of C<vim>, try compile your favorite editor using C<rs compile tarball>
+and see how a package is generated using B<rs>. The C<rs> directory is the
+git repository of B<rs>, and the B<pkg> directory contains the compiled
+packages and database for the VM image. Happy hacking, and remember C<man rs>
+is your friend.
+
+You could also mount the image directly using:
+
+    # mount -o offset=$((2048*512)) vm.img mountpoint
+
+And then enter the mountpoint and use it without C<qemu>, by entering
+I mean all the methods from C<unshare> to a full fledged container utility
+and to a plain C<chroot>, pick the one you like best.
+
+=head1 BUILDING
+
+Just follow the usual idiom to build a Perl module:
+
+    # perl Makefile.PL
+    # make
+    # make install
+
+That will install B<rs> to your system directory and it's recommended since
+you do not have to mess around with the PATH or PERL5LIB environment. You could
+also install to a custom directory by using:
+
+    # perl Makefile.PL INSTALL_BASE=/path/to/prefix
+
+The executable will reside in the C<bin> direcory under prefix and the Perl
+modules will be in C<lib/perl5>. Adjust your
+PATH and PERL5LIB accordingly.
+
+Note that since C<App::rs> is used to bootstrap both RSLinux and CPAN, it's
+explicitly designed to have no dependency other than the core Perl modules.
+
+=head1 CPAN
+
+I recently extended C<App::rs> to be the first reference counting CPAN client,
+by adding a reference counting database to connect each package together.
+
+By default, modules will be installed into the C<CPAN> directory under
+your home, and C<.rs> directory will be used to store metadata about those
+installed modules. Compilation will happen under the current directory,
+the build directory of individual module will be removed automatically,
+but the downloaded source tarballs will be preserved since they may be
+useful for futher reference. You could use C<App::rs> without any configuration,
+but of course all these settings could be customized, if
+you want to do customization reading the full mannual is highly suggested,
+it will be worth your while.
+
+The only thing you have to do is setting your C<PERL5LIB> environment to include
+C<< <HOME>/CPAN/lib/perl5 >>,
+assuming you're using the default configuration,
+you don't have to do this before doing installation using B<rs> since B<rs> will automatically
+add them and print a helpful reminder if they're missing during the installation
+process. Here's some quick usage introduction:
+
+    # CPAN module A::B::C will be installed along with all its dependency.
+    $ rs install A::B::C
+
+    # CPAN module A::B::C will be uninstalled along with all its dependency,
+    # so that the rs-cpan directory will be completely empty.
+    $ rs uninstall A::B::C
+
+    # CPAN module A::B::C will be immediately restored from the binary packages
+    # generated during the first install.
+    $ rs install A::B::C
+
+Please see my TPF proposal for more information on the current state, plans,
+caveats, etc., I will merge it back here once the granting process finishes.
+
+=head2 CPAN COMMANDS
+
+=over 4
+
+=item install
+
+C<install> accepts the name of a CPAN module (A::B::C) as parameter and installs
+this module and all its recursive dependency. No installation will be done if this
+module is already installed, but the C<direct> flag will always be set
+in the database.
+
+=item uninstall
+
+C<uninstall> takes one argument, the name of the module to be uninstalled,
+it must be directly installed by you, i.e. not only as a dependency pulled
+in, if it's still being referenced by another module no uninstallation
+will be done, but the C<direct> flag will still be cleared in the
+database, otherwise this module will be removed along with its dependency,
+potentially its dependency's dependency, etc.
+
+=item direct
+
+Print a list of modules that're directly installed by you, in comparison to
+the C<list> command where every installed module will be printed.
+
+=item orphan
+
+Show which module has become an orphan, i.e. a module that's neither directly
+installed by you nor a dependency of another module. For example, if you only
+installed one module using B<rs> and later uninstalled it, this module and
+all of its recursive dependency will become orphans, they're removed from the
+directory into which CPAN modules are installed, but binary packages of them and
+their entries in the reference counting database are not deleted, since
+it allows instant restoration if you later decide to re-install this module,
+or if you are installing a module that shares dependency with this module.
+
+=item adopt
+
+Adopt all the orphans, binary packages of them and their entries in the
+reference counting database will all be removed, there will be no sign
+that they ever existed once this command finishes. A typical pattern would be:
+
+    # Module A::B::C looks interesting, install it and have a try.
+    $ rs install A::B::C
+
+    # Don't want it anymore.
+    $ rs uninstall A::B::C
+
+    # There will be absolutely no sign that module A::B::C is ever installed.
+    $ rs adopt
+
+=back
+
+The not CPAN specific commands L</tag> L</which> L</list> L</crowded>
+are still very useful when using B<rs> as a CPAN client, please see
+their description for more information.
+
+=head1 SEE ALSO
+
+A short L<video|https://www.youtube.com/watch?v=QtMcbqtivOU> introduction
+to App::rs as CPAN client.
+
+=head1 LICENSE
+
+The package manager B<rs> as well as the RSLinux VM image are released
+under GPLv3.
+
+=head1 AUTHOR
+
+Yang Bo <yb@rslinux.fun>
+
+=cut
